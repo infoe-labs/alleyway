@@ -1,0 +1,12 @@
+{
+ "format": 1,
+ "symbols": [
+  {
+   "symbol": "SPY",
+   "file": "res://data/SPY.bin",
+   "bars": 6709,
+   "start": "2000-01-03",
+   "end": "2026-09-04"
+  }
+ ]
+}

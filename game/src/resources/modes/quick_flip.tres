@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="ModeConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/core/mode_config.gd" id="1_mode"]
+
+[resource]
+script = ExtResource("1_mode")
+id = "quick_flip"
+display_name = "Quick Flip"
+blurb = "One read of the tape. Call the next move before the clock runs out."
+kind = 0
+unlock_rank = 0
+symbols = Array[String](["SPY"])
+bar_seconds = 1.35
+reveal_speed_mult = 3.2
+decision_seconds = 6.5
+ticks_per_bar = 24
+warmup_min = 12
+warmup_max = 20
+horizon_min = 1
+horizon_max = 4
+sessions = 2
+segment_bars_min = 10
+segment_bars_max = 16
+allow_cash = false
+start_bankroll = 10000.0
+bust_at = 50.0

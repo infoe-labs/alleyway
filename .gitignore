@@ -1,0 +1,14 @@
+# Reference material (old project with venv/node_modules — never commit)
+references/
+.vscode/
+
+# Godot
+game/.godot/
+*.tmp
+
+# Build output
+dist/
+
+# OS/editor noise
+.DS_Store
+*~

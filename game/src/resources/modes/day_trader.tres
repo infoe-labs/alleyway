@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="ModeConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/core/mode_config.gd" id="1_mode"]
+
+[resource]
+script = ExtResource("1_mode")
+id = "day_trader"
+display_name = "Day Trader"
+blurb = "Five sessions. At every close, commit long, cash, or short overnight. Don't go bust by Friday."
+kind = 1
+unlock_rank = 1
+symbols = Array[String](["SPY"])
+bar_seconds = 15.0
+reveal_speed_mult = 4.5
+decision_seconds = 7.0
+ticks_per_bar = 26
+warmup_min = 12
+warmup_max = 20
+horizon_min = 1
+horizon_max = 4
+sessions = 5
+segment_bars_min = 10
+segment_bars_max = 16
+allow_cash = true
+start_bankroll = 10000.0
+bust_at = 50.0
