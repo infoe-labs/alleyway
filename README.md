@@ -1,10 +1,12 @@
 # Afterbell
 
+**▶ [Play now: https://infoe-labs.github.io/alleyway/](https://infoe-labs.github.io/alleyway/)**
+
 *The market, years ago, in realtime — right now.*
 
 A tap-only trading game built in Godot 4.7 that replays real SPY history as a
-live-looking tape. You watch the chart stream, then **tap BUY or SELL** before
-the clock runs out. Money is the score; going bust ends the run.
+live-looking tape. You watch the chart stream, then **tap BUY, CASH, or SHORT**
+before the clock runs out. Money is the score; going bust ends the run.
 
 Born from `references/learn-stock-trading/` ("Afterbell", a local market
 replay studio): same OHLCV archive, rebuilt as a mobile-first web game.
@@ -13,10 +15,10 @@ replay studio): same OHLCV archive, rebuilt as a mobile-first web game.
 
 - **Quick Flip** — one read of the tape. Watch ~20 s of synthesized live
   price action from a random historical window, then call the next move
-  (BUY/SELL) inside a 5–7 s window. Endless; your bankroll carries across
-  calls. Bust → run over.
+  (**BUY / CASH / SHORT**) inside a 5–7 s window. Endless; your bankroll
+  carries across calls. Bust → run over.
 - **Day Trader** — five sessions, one week. At every close you commit
-  overnight: **long, cash, or short**. Settled at next close. Unlocks at
+  overnight: **buy, cash, or short**. Settled at next close. Unlocks at
   Broker rank.
 - **Swing Trader** — months compressed to minutes, rebalance at each
   checkpoint. Unlocks at Trader rank.
@@ -31,7 +33,7 @@ endless yet reproducible: the same seed is the same level forever. Ranks
 
 | Action | Mobile | Keyboard |
 |---|---|---|
-| Place a call | tap BUY / SELL / CASH | `Tab` switches side, `Space`/`Enter` commits |
+| Place a call | tap BUY / CASH / SHORT | `Tab` switches side, `Space`/`Enter` commits |
 | Fast-forward the tape | tap the chart | tap the chart (or `>>` to skip to the decision) |
 | Pause | `II` | `Esc` |
 
@@ -93,10 +95,11 @@ project's `data/exports/` if you want to extend the game.
 game/
   src/main.gd            autoload screen manager (theme + goto)
   src/autoload/          GameState (profile, ranks, save) · MarketData (archives)
-  src/core/              MarketSeries · Tape (OHLC -> deterministic ticks)
+  src/core/              MarketSeries · Tape (OHLC -> deterministic ticks) · Indicators
                          LevelGen/LevelDef (seeded levels) · RoundRules (settle math)
   src/game/round_flow.gd enum FSM: INTRO>WATCH>DECIDE>RESOLVE>SETTLE>... shared by all modes
-  src/ui/                PriceChart (line tape + volume + entry line), DecisionBar, UI theme
+  src/ui/                PriceChart (candles + grid-locked tape, EMA/BB, volume, MACD),
+                         DecisionBar (BUY/CASH/SHORT pad), UI theme
   src/screens/           title, mode select (+ Hall of Fame), rank record, play
   tests/                 headless logic tests + UI/flow smoke
 tools/                   build_data.py, make_icons.py, serve.py, e2e.mjs
@@ -115,4 +118,4 @@ Pushing to `main` runs `.github/workflows/deploy.yml`: imports the project,
 runs both test suites, exports the no-threads Web build, and publishes `dist/`
 to GitHub Pages (Settings → Pages → Source: **GitHub Actions**, one time).
 
-After the first deploy: `https://infoe-labs.github.io/alleyway/`.
+After the first deploy: [https://infoe-labs.github.io/alleyway/](https://infoe-labs.github.io/alleyway/).
