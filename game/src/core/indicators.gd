@@ -81,6 +81,39 @@ static func macd(src: PackedFloat32Array, fast := 12, slow := 26, sig_period := 
 	return out
 
 
+## Wilder RSI over closes; NAN before the warm-up window.
+static func rsi(src: PackedFloat32Array, period := 14) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(src.size())
+	out.fill(NAN)
+	if src.size() <= period:
+		return out
+	var avg_gain := 0.0
+	var avg_loss := 0.0
+	for i in range(1, period + 1):
+		var ch := src[i] - src[i - 1]
+		if ch > 0.0:
+			avg_gain += ch
+		else:
+			avg_loss -= ch
+	avg_gain /= period
+	avg_loss /= period
+	out[period] = _rsi_value(avg_gain, avg_loss)
+	for i in range(period + 1, src.size()):
+		var ch2 := src[i] - src[i - 1]
+		avg_gain = (avg_gain * (period - 1) + maxf(ch2, 0.0)) / period
+		avg_loss = (avg_loss * (period - 1) + maxf(-ch2, 0.0)) / period
+		out[i] = _rsi_value(avg_gain, avg_loss)
+	return out
+
+
+static func _rsi_value(avg_gain: float, avg_loss: float) -> float:
+	if avg_loss <= 0.0:
+		return 50.0 if avg_gain <= 0.0 else 100.0
+	var rs := avg_gain / avg_loss
+	return 100.0 - 100.0 / (1.0 + rs)
+
+
 ## Bollinger bands around a simple moving average.
 static func bollinger(src: PackedFloat32Array, period := 20, mult := 2.0) -> Dictionary:
 	var n := src.size()

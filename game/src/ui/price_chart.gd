@@ -4,21 +4,32 @@ extends Control
 ## The star of the show: a full trading terminal drawn in one pass.
 ## History arrives pre-seeded from the series (closed candles), the live
 ## tape streams on top: a forming candle, the tick line, EMA9/EMA21 and
-## Bollinger(20,2) over the closes, a per-bar volume band, and a MACD
-## (12/26/9) panel — plus the entry line and last-price tag.
+## Bollinger(20,2) over the closes, a per-bar volume band, MACD (12/26/9)
+## and RSI(14) panels — plus entry line, last-price tag, and a hover/drag
+## crosshair with an OHLC + indicator readout, like a real dashboard.
+##
+## The x scale adapts to the mode: Day Trader zooms into the live session
+## (one bar = one trading day, clock axis 09:30->16:00); Quick Flip and
+## Swing show a 30-bar window with a date axis.
 
-const VISIBLE_BARS := 30      # bars across the full width
+signal tap_tape()   # a clean tap (no drag) — play screen maps it to ff toggle
+
+const VISIBLE_BARS := 30      # default bars across the full width
 const LOOKBACK := 64          # bars kept (history + live)
 const HIST_BARS := 40         # bars the screen should seed before the live bar
 const PAD_TOP := 0.06
-const PAD_BOTTOM := 0.05      # room for the x-axis dates
-const VOL_RATIO := 0.12
-const MACD_RATIO := 0.17
+const PAD_BOTTOM := 0.05      # room for the x-axis labels
+const VOL_RATIO := 0.10
+const MACD_RATIO := 0.14
+const RSI_RATIO := 0.12
 const BAND_GAP := 8.0
+const RSI_COLOR := Color(0.66, 0.56, 0.95)
 const _MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 var tpb := 24                              # ticks per bar (from the mode)
+var visible_bars := VISIBLE_BARS           # bars across the width (per mode)
+var intraday := false                      # day-trader view: live bar fills the screen
 var session_start_price := 0.0             # baseline for green/red decision
 var entry_price := -1.0                    # dashed entry line; <0 disables
 var entry_label := ""
@@ -32,22 +43,72 @@ var bc := PackedFloat32Array()
 var bv := PackedFloat32Array()
 
 var points := PackedFloat32Array()         # live tick prices, newest last
-var point_u := PackedFloat32Array()         # each tick's absolute bar-space coord
-var _seq0 := 0                              # sequence number of bc[0] (trim-proof bar ids)
-var _bar_days := PackedInt32Array()         # epoch day per bar, for x-axis dates
-var _series: MarketSeries = null            # ref for date formatting
+var point_u := PackedFloat32Array()        # each tick's absolute bar-space coord
+var _seq0 := 0                             # sequence number of bc[0] (trim-proof bar ids)
+var _bar_days := PackedInt32Array()        # epoch day per bar, for x-axis dates
+var _series: MarketSeries = null           # ref for date formatting
 
 var _live_bar_id := -1                     # series bar index of the forming bar
 var _ema9 := PackedFloat32Array()
 var _ema21 := PackedFloat32Array()
 var _bb := {}
 var _macd := {}
+var _rsi := PackedFloat32Array()
 var _view_min := 0.0
 var _view_max := 1.0
 
+# Crosshair scrub state.
+var _hover_x := NAN
+var _hover_y := NAN
+var _down := Vector2(1e9, 1e9)
+var _down_msec := 0
+var _tap_candidate := false
+const TAP_MAX_MS := 500      # hold longer than this = scrub intent, never FF
+const TAP_MAX_DIST := 12.0
 
-func configure(ticks_per_bar: int) -> void:
+
+func _ready() -> void:
+	mouse_exited.connect(func() -> void:
+		_hover_x = NAN
+		_hover_y = NAN
+		queue_redraw())
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		_hover_x = event.position.x
+		_hover_y = event.position.y
+		queue_redraw()
+	elif event is InputEventScreenTouch:
+		if event.pressed:
+			_down = event.position
+			_down_msec = Time.get_ticks_msec()
+			_tap_candidate = true
+			_hover_x = event.position.x
+			_hover_y = event.position.y
+		else:
+			# Tap = short + still. A finger held down to read the popover is
+			# scrub intent and must never fast-forward the game.
+			if _tap_candidate and Time.get_ticks_msec() - _down_msec <= TAP_MAX_MS:
+				tap_tape.emit()
+			_hover_x = NAN
+			_hover_y = NAN
+		queue_redraw()
+		accept_event()
+	elif event is InputEventScreenDrag:
+		if event.position.distance_to(_down) > TAP_MAX_DIST:
+			_tap_candidate = false
+		_hover_x = event.position.x
+		_hover_y = event.position.y
+		queue_redraw()
+		accept_event()
+
+
+func configure(ticks_per_bar: int, p_visible_bars: int = VISIBLE_BARS,
+		p_intraday: bool = false) -> void:
 	tpb = maxi(4, ticks_per_bar)
+	visible_bars = clampi(p_visible_bars, 2, VISIBLE_BARS)
+	intraday = p_intraday
 
 
 func reset() -> void:
@@ -66,6 +127,8 @@ func reset() -> void:
 	entry_label = ""
 	session_start_price = 0.0
 	last_price = 0.0
+	_hover_x = NAN
+	_hover_y = NAN
 	_refresh_indicators()
 	refresh_view(true)
 
@@ -120,7 +183,7 @@ func push(price: float, bar_volume: float, bar: int, tick: int, in_gap: bool) ->
 	points.append(price)
 	point_u.append(float(_seq0 + bc.size() - 1) + frac)
 	# Keep only what's on screen; the line traces the last screen of sessions.
-	var floor_u := float(_seq0 + bc.size() - 1) - float(VISIBLE_BARS + 2)
+	var floor_u := float(_seq0 + bc.size() - 1) - float(visible_bars + 2)
 	var drop := 0
 	while drop < point_u.size() and point_u[drop] < floor_u:
 		drop += 1
@@ -157,6 +220,7 @@ func _refresh_indicators() -> void:
 	_ema21 = Indicators.ema(bc, 21)
 	_bb = Indicators.bollinger(bc, 20, 2.0)
 	_macd = Indicators.macd(bc, 12, 26, 9)
+	_rsi = Indicators.rsi(bc, 14)
 
 
 func _current_color() -> Color:
@@ -168,9 +232,12 @@ func _current_color() -> Color:
 func _refresh_target(out_min: Array, out_max: Array) -> void:
 	var lo := INF
 	var hi := -INF
-	# Hero + anchor: the live session's streamed ticks set the story, the last
-	# few bars anchor the scale so a fresh/flat session doesn't zoom to noise.
-	var from_i := maxi(0, bc.size() - 8)
+	# Hero + anchor: the live session's streamed ticks set the story. Day
+	# Trader anchors on the live bar alone (the day fills the screen); other
+	# modes anchor on the last few bars so a fresh/flat session can't zoom
+	# into noise.
+	var anchor := 1 if intraday else 8
+	var from_i := maxi(0, bc.size() - anchor)
 	for i in range(from_i, bc.size()):
 		lo = minf(lo, bl[i])
 		hi = maxf(hi, bh[i])
@@ -184,7 +251,7 @@ func _refresh_target(out_min: Array, out_max: Array) -> void:
 		lo = minf(lo, last_price)
 		hi = maxf(hi, last_price)
 	if lo > hi:  # nothing streamed yet: fall back to the visible bars
-		var bars_from := maxi(0, bc.size() - VISIBLE_BARS)
+		var bars_from := maxi(0, bc.size() - visible_bars)
 		for i in range(bars_from, bc.size()):
 			lo = minf(lo, bl[i])
 			hi = maxf(hi, bh[i])
@@ -225,8 +292,12 @@ func _y_for(price: float, top: float, height: float) -> float:
 
 func _bar_x(seq_from_end: int) -> float:
 	# seq_from_end: 0 = newest bar, 1 = previous, ... right-anchored.
-	var bar_w := size.x / float(VISIBLE_BARS)
+	var bar_w := size.x / float(visible_bars)
 	return size.x - (float(seq_from_end) + 0.5) * bar_w
+
+
+func _fmt(v: float) -> String:
+	return "%.2f" % v if is_finite(v) else "-"
 
 
 func _draw() -> void:
@@ -234,15 +305,19 @@ func _draw() -> void:
 		return
 	var w := size.x
 	var n := bc.size()
-	var bar_w := w / float(VISIBLE_BARS)
-	var body_w := maxf(bar_w * 0.62, 2.0)
+	var bar_w := w / float(visible_bars)
+	# Cap bar widths: in the 3-bar day-trader view uncapped bodies become slabs.
+	var body_w := minf(maxf(bar_w * 0.62, 2.0), 56.0)
+	var thin_w := minf(maxf(bar_w * 0.45, 2.0), 22.0)
 
-	# Regions.
+	# Regions: price / volume / macd / rsi / date axis.
 	var price_top := size.y * PAD_TOP
 	var bottom := size.y * (1.0 - PAD_BOTTOM)
+	var rsi_h := size.y * RSI_RATIO
 	var macd_h := size.y * MACD_RATIO
 	var vol_h := size.y * VOL_RATIO
-	var macd_top := bottom - macd_h
+	var rsi_top := bottom - rsi_h
+	var macd_top := rsi_top - BAND_GAP - macd_h
 	var vol_top := macd_top - BAND_GAP - vol_h
 	var price_bot := vol_top - BAND_GAP
 	var price_h := price_bot - price_top
@@ -279,7 +354,7 @@ func _draw() -> void:
 			Color(0.55, 0.65, 0.78, 0.42), 1.0, price_top - 1.0, price_bot + 1.0)
 
 	# Candles.
-	var from_i := maxi(0, n - VISIBLE_BARS - 2)
+	var from_i := maxi(0, n - visible_bars - 2)
 	for i in range(from_i, n):
 		var seq_from_end := n - 1 - i
 		var xc := _bar_x(seq_from_end)
@@ -344,17 +419,128 @@ func _draw() -> void:
 	draw_string(font, Vector2(6, vol_top + 12), "VOLUME",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(UI.TEXT_DIM, 0.8))
 	var max_vol := 1.0
-	for i in range(maxi(0, n - VISIBLE_BARS), n):
+	for i in range(maxi(0, n - visible_bars), n):
 		max_vol = maxf(max_vol, bv[i])
 	for i in range(from_i, n):
 		var xc := _bar_x(n - 1 - i)
 		var vh := vol_h * (bv[i] / max_vol)
 		var vcol := UI.GREEN if bc[i] >= bo[i] else UI.RED
-		draw_rect(Rect2(xc - body_w / 2.0, vol_top + (vol_h - vh), body_w, vh),
+		draw_rect(Rect2(xc - thin_w / 2.0, vol_top + (vol_h - vh), thin_w, vh),
 			Color(vcol, 0.35))
 
-	# X-axis dates (every 5th bar, at the bar's cell center).
-	if _bar_days.size() == n:
+	_draw_x_axis(font, w, bar_w, n, from_i, bottom)
+
+	# MACD panel.
+	draw_string(font, Vector2(6, macd_top + 12), "MACD 12/26/9",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(UI.TEXT_DIM, 0.8))
+	var macd_line: PackedFloat32Array = _macd.get("macd", PackedFloat32Array())
+	var macd_sig: PackedFloat32Array = _macd.get("signal", PackedFloat32Array())
+	var macd_hist: PackedFloat32Array = _macd.get("hist", PackedFloat32Array())
+	if macd_line.size() == n:
+		var mlo := INF
+		var mhi := -INF
+		for i in range(maxi(0, n - visible_bars), n):
+			for v in [macd_line[i], macd_sig[i], macd_hist[i]]:
+				if is_finite(v):
+					mlo = minf(mlo, v)
+					mhi = maxf(mhi, v)
+		if is_finite(mlo):
+			if mhi - mlo < 0.0001:
+				mhi = mlo + 0.0001
+			mlo -= (mhi - mlo) * 0.12
+			mhi += (mhi - mlo) * 0.12
+			var zero_y := macd_top + macd_h * (1.0 - (0.0 - mlo) / (mhi - mlo))
+			draw_line(Vector2(0, zero_y), Vector2(w, zero_y), Color(UI.GRID, 1.0), 1.0)
+			for i in range(from_i, n):
+				var xc := _bar_x(n - 1 - i)
+				if is_finite(macd_hist[i]):
+					var hy := macd_top + macd_h * (1.0 - (macd_hist[i] - mlo) / (mhi - mlo))
+					var top := minf(hy, zero_y)
+					var hh := absf(hy - zero_y)
+					draw_rect(Rect2(xc - thin_w / 2.0, top, thin_w, maxf(hh, 1.0)),
+						Color(UI.GREEN, 0.5) if macd_hist[i] >= 0.0 else Color(UI.RED, 0.5))
+			_polyline_macd(macd_line, w, bar_w, n, macd_top, macd_h, mlo, mhi, UI.CASH_BLUE)
+			_polyline_macd(macd_sig, w, bar_w, n, macd_top, macd_h, mlo, mhi, UI.GOLD)
+
+	# RSI panel (fixed 0..100, guide lines at 30/70).
+	draw_string(font, Vector2(6, rsi_top + 11), "RSI 14",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(UI.TEXT_DIM, 0.8))
+	if _rsi.size() == n:
+		for lvl: float in [30.0, 70.0]:
+			var gy := rsi_top + rsi_h * (1.0 - lvl / 100.0)
+			draw_dashed_line(Vector2(0, gy), Vector2(w, gy), Color(UI.GRID, 0.9), 1.0, 6.0)
+		var rtop := rsi_top + 2.0
+		var rh := rsi_h - 4.0
+		var run := PackedVector2Array()
+		for i in range(from_i, n):
+			if is_finite(_rsi[i]):
+				run.append(Vector2(_bar_x(n - 1 - i), rtop + rh * (1.0 - _rsi[i] / 100.0)))
+		if run.size() >= 2:
+			draw_polyline(run, RSI_COLOR, 1.5, true)
+
+	# Crosshair + readout (mouse hover on desktop, drag on touch).
+	if is_finite(_hover_x) and is_finite(_hover_y) and _hover_x >= 0.0 and _hover_x <= w:
+		var best_i := from_i
+		var best_d := INF
+		for i in range(from_i, n):
+			var d := absf(_bar_x(n - 1 - i) - _hover_x)
+			if d < best_d:
+				best_d = d
+				best_i = i
+		var cx := _bar_x(n - 1 - best_i)
+		var cy := clampf(_hover_y, price_top, price_bot)
+		draw_line(Vector2(cx, price_top), Vector2(cx, price_bot), Color(UI.TEXT, 0.35), 1.0)
+		draw_line(Vector2(0, cy), Vector2(w, cy), Color(UI.TEXT, 0.22), 1.0)
+		var hover_price: float = _view_max - (cy - price_top) / maxf(price_h, 1.0) \
+			* (_view_max - _view_min)
+		var ytag := Rect2(w - 60.0, cy - 10.0, 58.0, 20.0)
+		draw_rect(ytag, UI.BG)
+		draw_rect(ytag, Color(UI.TEXT_DIM, 0.6), false, 1.0)
+		draw_string(font, ytag.position + Vector2(5, 15), "%.2f" % hover_price,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, UI.TEXT)
+		_draw_readout(font, best_i, price_top)
+
+
+## Session clock (Day Trader) or dates (other modes) under the price bands.
+func _draw_x_axis(font: Font, w: float, bar_w: float, n: int, from_i: int, bottom: float) -> void:
+	if _bar_days.size() != n:
+		return
+	if intraday:
+		# 09:30 .. 16:00 across the live bar's cell, date under it.
+		var every := maxi(1, int(round(float(tpb) / 4.0)))
+		var clock_ticks: Array[int] = []
+		var t := 0
+		while t < tpb - 1:
+			clock_ticks.append(t)
+			t += every
+		clock_ticks.append(tpb - 1)
+		var drawn: Array = []  # [x, label] pairs kept, spaced >= 42px apart
+		for tt in clock_ticks:
+			var x := w - (1.0 - (float(tt) + 0.5) / float(tpb)) * bar_w
+			x = minf(x, w - 24.0)  # keep the last label inside the canvas
+			var is_last := tt == tpb - 1
+			if not drawn.is_empty() and x - float(drawn.back()[0]) < 34.0:
+				if not is_last:
+					continue  # would collide with the previous label
+				drawn.pop_back()  # the close label wins its slot
+			drawn.append([x, MarketSeries.session_clock(tt, tpb)])
+		for pair in drawn:
+			var x: float = pair[0]
+			draw_string(font, Vector2(x - 20.0, bottom + 12), String(pair[1]),
+				HORIZONTAL_ALIGNMENT_CENTER, 40, 10, Color(UI.TEXT_DIM, 0.9))
+		for i in range(from_i, n):
+			var xc := _bar_x(n - 1 - i)
+			if xc < 0.0 or xc > w - 16.0:
+				continue
+			var d := Time.get_datetime_dict_from_unix_time(_bar_days[i] * 86400)
+			var lbl := "%s %d" % [_MONTHS[d.month - 1], d.day]
+			var live := i == n - 1
+			if live:
+				lbl = "%s %d '%02d" % [_MONTHS[d.month - 1], d.day, d.year % 100]
+			draw_string(font, Vector2(xc - 30.0, bottom + 26), lbl,
+				HORIZONTAL_ALIGNMENT_CENTER, 60, 10,
+				UI.TEXT if live else Color(UI.TEXT_DIM, 0.7))
+	else:
 		var last_year := 0
 		for i in range(from_i, n):
 			if (_seq0 + i) % 5 != 0:
@@ -367,42 +553,49 @@ func _draw() -> void:
 			if d.year != last_year:
 				label += " '%02d" % (d.year % 100)
 			last_year = d.year
-			draw_string(font, Vector2(xc - 20.0, bottom + 14), label,
+			draw_string(font, Vector2(xc - 20.0, bottom + 16), label,
 				HORIZONTAL_ALIGNMENT_CENTER, 44, 11, Color(UI.TEXT_DIM, 0.9))
 
-	# MACD panel.
-	draw_string(font, Vector2(6, macd_top + 12), "MACD 12/26/9",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(UI.TEXT_DIM, 0.8))
-	var macd_line: PackedFloat32Array = _macd.get("macd", PackedFloat32Array())
-	var macd_sig: PackedFloat32Array = _macd.get("signal", PackedFloat32Array())
-	var macd_hist: PackedFloat32Array = _macd.get("hist", PackedFloat32Array())
-	if macd_line.size() != n:
-		return
-	var mlo := INF
-	var mhi := -INF
-	for i in range(maxi(0, n - VISIBLE_BARS), n):
-		for v in [macd_line[i], macd_sig[i], macd_hist[i]]:
-			if is_finite(v):
-				mlo = minf(mlo, v)
-				mhi = maxf(mhi, v)
-	if not is_finite(mlo):
-		return
-	if mhi - mlo < 0.0001:
-		mhi = mlo + 0.0001
-	mlo -= (mhi - mlo) * 0.12
-	mhi += (mhi - mlo) * 0.12
-	var zero_y := macd_top + macd_h * (1.0 - (0.0 - mlo) / (mhi - mlo))
-	draw_line(Vector2(0, zero_y), Vector2(w, zero_y), Color(UI.GRID, 1.0), 1.0)
-	for i in range(from_i, n):
-		var xc := _bar_x(n - 1 - i)
-		if is_finite(macd_hist[i]):
-			var hy := macd_top + macd_h * (1.0 - (macd_hist[i] - mlo) / (mhi - mlo))
-			var top := minf(hy, zero_y)
-			var hh := absf(hy - zero_y)
-			draw_rect(Rect2(xc - body_w / 2.0, top, body_w, maxf(hh, 1.0)),
-				Color(UI.GREEN, 0.5) if macd_hist[i] >= 0.0 else Color(UI.RED, 0.5))
-	_polyline_macd(macd_line, w, bar_w, n, macd_top, macd_h, mlo, mhi, UI.CASH_BLUE)
-	_polyline_macd(macd_sig, w, bar_w, n, macd_top, macd_h, mlo, mhi, UI.GOLD)
+
+## Dashboard-style readout card for the crosshair's bar.
+func _draw_readout(font: Font, i: int, price_top: float) -> void:
+	var prev_c := bc[i - 1] if i > 0 else bc[i]
+	var chg := bc[i] / prev_c - 1.0 if prev_c > 0.0 else 0.0
+	var d := Time.get_datetime_dict_from_unix_time(_bar_days[i] * 86400) \
+		if _bar_days.size() > i else {}
+	var title := "----"
+	if not d.is_empty():
+		title = "%s %d, %d" % [_MONTHS[d.month - 1], d.day, d.year]
+		if i == bc.size() - 1:
+			title += "  (live)"
+	var bbu: PackedFloat32Array = _bb.get("upper", PackedFloat32Array())
+	var bbl: PackedFloat32Array = _bb.get("lower", PackedFloat32Array())
+	var ml: PackedFloat32Array = _macd.get("macd", PackedFloat32Array())
+	var ms: PackedFloat32Array = _macd.get("signal", PackedFloat32Array())
+	var lines := [
+		["O %s   H %s" % [_fmt(bo[i]), _fmt(bh[i])], UI.TEXT],
+		["L %s   C %s  (%s)" % [_fmt(bl[i]), _fmt(bc[i]), RoundRules.fmt_pct(chg)],
+			UI.GREEN if chg >= 0.0 else UI.RED],
+		["VOL %.1fM" % (bv[i] / 1_000_000.0), UI.TEXT_DIM],
+		["EMA9 %s   EMA21 %s" % [_fmt(_ema9[i]) if _ema9.size() > i else "-",
+			_fmt(_ema21[i]) if _ema21.size() > i else "-"], UI.TEXT_DIM],
+		["BB %s - %s" % [_fmt(bbl[i]) if bbl.size() > i else "-",
+			_fmt(bbu[i]) if bbu.size() > i else "-"], UI.TEXT_DIM],
+		["MACD %s   SIG %s" % [_fmt(ml[i]) if ml.size() > i else "-",
+			_fmt(ms[i]) if ms.size() > i else "-"], UI.TEXT_DIM],
+		["RSI %s" % (_fmt(_rsi[i]) if _rsi.size() > i else "-"), RSI_COLOR],
+	]
+	var pad := 8.0
+	var row_h := 15.0
+	var rect := Rect2(6.0, price_top + 2.0, 208.0, pad * 2.0 + row_h * float(lines.size() + 1))
+	draw_rect(rect, Color(UI.BG, 0.94))
+	draw_rect(rect, Color(UI.TEXT_DIM, 0.45), false, 1.0)
+	draw_string(font, rect.position + Vector2(pad, pad + 11), title,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, UI.GOLD)
+	for r in lines.size():
+		var entry: Array = lines[r]
+		draw_string(font, rect.position + Vector2(pad, pad + 11 + row_h * float(r + 1)),
+			String(entry[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, entry[1])
 
 
 ## Draws a bar-aligned polyline of finite values; `y_at` maps bar index -> y.

@@ -29,7 +29,7 @@ game/                  Godot project (open THIS dir, not repo root)
                        tape.gd         deterministic OHLC→tick-path synthesis:
                                        O→L→H→C or O→H→L→C per day + overnight gap bridges
                                        (this is what makes daily bars feel like a live tape)
-                       indicators.gd   Indicators: sma/ema/macd(12,26,9)/bollinger over
+                       indicators.gd   Indicators: sma/ema/macd(12,26,9)/bollinger/rsi(14)
                                        PackedFloat32Array closes; NAN before warm-up.
                                        NOTE: never name a param `signal` (reserved).
                        level_def.gd    LevelDef: everything a round needs
@@ -47,8 +47,15 @@ game/                  Godot project (open THIS dir, not repo root)
                          pre-seeded history candles via seed_history(series, from, to),
                          live forming candle + intraday tick line (gap ticks excluded),
                          EMA9/EMA21 + Bollinger(20,2) overlays, per-bar volume band,
-                         MACD(12,26/9) sub-panel, entry line, last-price tag.
-                         push(price, vol, bar, in_gap) from the flow's tick_pushed),
+                          MACD(12,26/9) + RSI(14) sub-panels, entry line,
+                          last-price tag, hover/drag crosshair with the
+                          OHLC+indicator readout card. configure(tpb,
+                          visible_bars, intraday): day trader = 3 bars +
+                          09:30-16:00 clock axis; others = 30 bars + date
+                          axis; bar widths capped (slab guard). Tap (<=500ms,
+                          <=12px move) emits tap_tape (FF toggle); hold/drag
+                          = scrub popover only. play_screen wires configure()
+                          per mode + _on_tap_tape.
                        decision_bar.gd (BUY/UP | CASH/SIT OUT | SHORT/DOWN pad)
   src/screens/         title_screen.gd, mode_select.gd, rank_screen.gd, play_screen.gd
                        (all plain Control scripts, built 100% in code)
@@ -96,7 +103,9 @@ python3 tools/serve.py dist 8080 &        # must be serve.py — correct wasm MI
 node tools/e2e.mjs                          # defaults to http://localhost:8080/index.html
 node tools/e2e.mjs https://infoe-labs.github.io/alleyway/   # against the live site
 # e2e drives two full quick-flip rounds: Tab/Space commit (CASH), Space on the
-# settle card (NEXT CALL regression), direct BUY tap regression; screenshots land in /tmp/opencode/e2e
+# settle card (NEXT CALL regression), direct BUY tap regression; then reloads and
+# keyboard-navigates into Day Trader (clock axis, scrub-during-stream, FF tap).
+# Screenshots land in /tmp/opencode/e2e
 
 # Add a ticker:
 #   put CSV in tools/csv/, update symbol list in tools/build_data.py, run it, commit game/data/
@@ -120,7 +129,7 @@ Toolchain installed locally: Godot 4.7.2 at `~/tools/godot/godot`; web export te
 - `signal` is reserved in GDScript (Signal class) — can't be used as a parameter/var name (`Indicators.macd` uses `sig_period`).
 - In `-s` scripts, autoload identifiers (MarketData, GameState) are NOT compile-time available — use `root.get_node_or_null("MarketData")`.
 - No `for k, v in dict` and no `not in` in GDScript — iterate keys, use `not x in` / `has()`.
-- PriceChart: keep overlays band-clipped — `_polyline` drops points outside the price band, candles/volume/MACD loops iterate only the last `VISIBLE_BARS+2` bars (iterating from the oldest bar and `break`ing off-screen skips *everything*). The live line is pinned to the bar grid via `point_u` (bar-space coord from the tick index, trim-proof by `_seq0`) — never right-anchor it by raw tick count or it drifts across the candles. Line is the hero (2.5px); candles are muted context (0.45/0.55 alpha).
+- PriceChart: keep overlays band-clipped — `_polyline` drops points outside the price band, candles/volume/MACD loops iterate only the last `visible_bars+2` bars (iterating from the oldest bar and `break`ing off-screen skips *everything*). The live line is pinned to the bar grid via `point_u` (bar-space coord from the tick index, trim-proof by `_seq0`) — never right-anchor it by raw tick count or it drifts across the candles. Line is the hero (2.5px); candles are muted context (0.45/0.55 alpha). Cap bar-body widths when `visible_bars` is small (3-bar day-trader view otherwise renders 100px slabs). Clock-axis labels need min-spacing dedupe (two ticks clamped to the same right-edge x overprint each other). Touch: `tap_tape` fires only for releases <=500ms after press AND <=12px travel, so holding a finger to read the crosshair popover never fast-forwards.
 - Rounded corners fail triangulation on very thin StyleBox fills (see ProgressBar comment in `ui_theme.gd` — square corners there on purpose).
 
 ## Deferred / good next steps

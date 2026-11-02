@@ -84,6 +84,46 @@ await shot("09-buy-tap");
 await wait(8000); // reveal + settle
 await shot("10-settle-2");
 
+// Reload for a clean state, then keyboard-navigate into Day Trader mode
+// (focus order on mode select: back, QF open, QF hall, DT open).
+await page.reload({ waitUntil: "load" });
+await page.click("canvas", { position: { x: 210, y: 800 } }).catch(() => {});
+await wait(9000); // engine boot
+await page.keyboard.press("Tab");  // PLAY on title
+await wait(250);
+await page.keyboard.press("Enter");
+await wait(1500);
+await shot("11-mode-select");
+for (let i = 0; i < 4; i++) { await page.keyboard.press("Tab"); await wait(200); }
+await page.keyboard.press("Enter"); // Day Trader "Open the market"
+await wait(1500);
+await shot("12-dt-intro");
+await page.keyboard.press("Space"); // START SESSION
+await wait(800);
+
+// Finger-drag while the tape streams: popover must appear, FF must NOT toggle.
+await page.mouse.move(180, 300);
+await page.mouse.down();
+await page.mouse.move(300, 320, { steps: 8 });
+await wait(600); // held well past the tap threshold
+await shot("13a-dt-scrub-watch");
+await page.mouse.up();
+
+await page.mouse.click(210, 300); // quick tap -> 4x fast-forward
+await wait(5000);
+await shot("13-dt-watch");
+await page.mouse.click(396, 33); // ">>" if still streaming
+await wait(1200);
+await shot("14-dt-decide");
+
+// Scrub the crosshair across the day's candles.
+await page.mouse.move(230, 300);
+await page.mouse.down();
+await page.mouse.move(300, 260, { steps: 6 });
+await wait(400);
+await shot("15-dt-scrub");
+await page.mouse.up();
+
 const canvasOk = await page.evaluate(() => {
   const c = document.querySelector("canvas");
   return !!c && c.width > 0;

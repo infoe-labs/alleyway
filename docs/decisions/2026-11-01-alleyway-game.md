@@ -1,6 +1,6 @@
 # Alleyway — game decisions
 
-Godot game built from the "Afterbell" market-replay concept in `references/learn-stock-trading/`:
+Godot game built from the market-replay concept in `references/learn-stock-trading/`:
 a tap-only mobile-first trading game that streams historical SPY price action as a live-looking
 line chart and gives the player a short window to tap BUY/SELL.
 

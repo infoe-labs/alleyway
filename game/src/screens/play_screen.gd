@@ -97,10 +97,12 @@ func _ready() -> void:
 
 	# --- chart ---
 	chart = PriceChart.new()
-	chart.configure(level.mode.ticks_per_bar)
+	var day_mode := level.mode.kind == ModeConfig.Kind.DAY_TRADER
+	chart.configure(level.mode.ticks_per_bar,
+		3 if day_mode else PriceChart.VISIBLE_BARS, day_mode)
 	chart.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	chart.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	chart.gui_input.connect(_on_chart_input)
+	chart.tap_tape.connect(_on_tap_tape)
 	col.add_child(chart)
 
 	# --- decision pad ---
@@ -377,12 +379,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_toggle_pause()
 
 
-func _on_chart_input(event: InputEvent) -> void:
+func _on_tap_tape() -> void:
 	# Tapping the tape fast-forwards while watching — the other half of the
-	# one-thumb design. Decision taps go to the pad buttons only.
-	if event is InputEventScreenTouch and event.pressed:
-		if flow.state in [RoundFlow.State.WATCH, RoundFlow.State.RESOLVE]:
-			flow.set_ff(4 if flow.ff_mult == 1 else 1)
+	# one-thumb design. The chart emits this only for clean taps (a drag
+	# scrubs the crosshair instead). Decision taps go to the pad buttons.
+	if flow.state in [RoundFlow.State.WATCH, RoundFlow.State.RESOLVE]:
+		flow.set_ff(4 if flow.ff_mult == 1 else 1)
 
 
 func _toggle_pause() -> void:
