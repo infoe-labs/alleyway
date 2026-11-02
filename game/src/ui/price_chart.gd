@@ -11,10 +11,12 @@ const VISIBLE_BARS := 30      # bars across the full width
 const LOOKBACK := 64          # bars kept (history + live)
 const HIST_BARS := 40         # bars the screen should seed before the live bar
 const PAD_TOP := 0.06
-const PAD_BOTTOM := 0.03
+const PAD_BOTTOM := 0.05      # room for the x-axis dates
 const VOL_RATIO := 0.12
 const MACD_RATIO := 0.17
 const BAND_GAP := 8.0
+const _MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 var tpb := 24                              # ticks per bar (from the mode)
 var session_start_price := 0.0             # baseline for green/red decision
@@ -32,6 +34,8 @@ var bv := PackedFloat32Array()
 var points := PackedFloat32Array()         # live tick prices, newest last
 var point_u := PackedFloat32Array()         # each tick's absolute bar-space coord
 var _seq0 := 0                              # sequence number of bc[0] (trim-proof bar ids)
+var _bar_days := PackedInt32Array()         # epoch day per bar, for x-axis dates
+var _series: MarketSeries = null            # ref for date formatting
 
 var _live_bar_id := -1                     # series bar index of the forming bar
 var _ema9 := PackedFloat32Array()
@@ -54,8 +58,10 @@ func reset() -> void:
 	bv.clear()
 	points.clear()
 	point_u.clear()
+	_bar_days.clear()
 	_live_bar_id = -1
 	_seq0 = 0
+	_series = null
 	entry_price = -1.0
 	entry_label = ""
 	session_start_price = 0.0
@@ -66,6 +72,7 @@ func reset() -> void:
 
 ## Pre-populate closed candles for series bars [from_i, to_i] inclusive.
 func seed_history(series: MarketSeries, from_i: int, to_i: int) -> void:
+	_series = series
 	from_i = clampi(from_i, 0, series.count() - 1)
 	to_i = clampi(to_i, from_i, series.count() - 1)
 	for i in range(from_i, to_i + 1):
@@ -74,6 +81,7 @@ func seed_history(series: MarketSeries, from_i: int, to_i: int) -> void:
 		bl.append(series.lows[i])
 		bc.append(series.closes[i])
 		bv.append(series.volumes[i])
+		_bar_days.append(series.days[i])
 	_trim_bars()
 	_refresh_indicators()
 	refresh_view(true)
@@ -96,6 +104,10 @@ func push(price: float, bar_volume: float, bar: int, tick: int, in_gap: bool) ->
 		bl.append(price)
 		bc.append(price)
 		bv.append(bar_volume)
+		if _series != null:
+			_bar_days.append(_series.days[clampi(bar, 0, _series.count() - 1)])
+		else:
+			_bar_days.append(0)
 		_trim_bars()
 		_refresh_indicators()
 	else:
@@ -107,10 +119,14 @@ func push(price: float, bar_volume: float, bar: int, tick: int, in_gap: bool) ->
 		_refresh_indicators()
 	points.append(price)
 	point_u.append(float(_seq0 + bc.size() - 1) + frac)
-	var cap := 3 * tpb  # the line traces the live bar (+ a little overlap); history is candles
-	if points.size() > cap:
-		points = points.slice(points.size() - cap)
-		point_u = point_u.slice(point_u.size() - cap)
+	# Keep only what's on screen; the line traces the last screen of sessions.
+	var floor_u := float(_seq0 + bc.size() - 1) - float(VISIBLE_BARS + 2)
+	var drop := 0
+	while drop < point_u.size() and point_u[drop] < floor_u:
+		drop += 1
+	if drop > 0:
+		points = points.slice(drop)
+		point_u = point_u.slice(drop)
 	refresh_view(false)
 	queue_redraw()
 
@@ -132,6 +148,7 @@ func _trim_bars() -> void:
 		bl.remove_at(0)
 		bc.remove_at(0)
 		bv.remove_at(0)
+		_bar_days.remove_at(0)
 		_seq0 += 1
 
 
@@ -151,21 +168,37 @@ func _current_color() -> Color:
 func _refresh_target(out_min: Array, out_max: Array) -> void:
 	var lo := INF
 	var hi := -INF
-	var from_i := maxi(0, bc.size() - VISIBLE_BARS)
+	# Hero + anchor: the live session's streamed ticks set the story, the last
+	# few bars anchor the scale so a fresh/flat session doesn't zoom to noise.
+	var from_i := maxi(0, bc.size() - 8)
 	for i in range(from_i, bc.size()):
 		lo = minf(lo, bl[i])
 		hi = maxf(hi, bh[i])
-	if entry_price > 0.0:
-		lo = minf(lo, entry_price)
-		hi = maxf(hi, entry_price)
+	for p in points:
+		lo = minf(lo, p)
+		hi = maxf(hi, p)
+	if session_start_price > 0.0:
+		lo = minf(lo, session_start_price)
+		hi = maxf(hi, session_start_price)
 	if last_price > 0.0:
 		lo = minf(lo, last_price)
 		hi = maxf(hi, last_price)
+	if lo > hi:  # nothing streamed yet: fall back to the visible bars
+		var bars_from := maxi(0, bc.size() - VISIBLE_BARS)
+		for i in range(bars_from, bc.size()):
+			lo = minf(lo, bl[i])
+			hi = maxf(hi, bh[i])
+	if entry_price > 0.0:
+		lo = minf(lo, entry_price)
+		hi = maxf(hi, entry_price)
 	if not is_finite(lo):
 		return
-	if hi - lo < hi * 0.001:
-		hi += hi * 0.001 + 0.01
-		lo -= hi * 0.001 + 0.01
+	# Floor the window so a flat session doesn't zoom into noise.
+	var mid := (lo + hi) * 0.5
+	var floor_w := maxf(mid * 0.004, 0.01)
+	if hi - lo < floor_w:
+		hi = mid + floor_w * 0.5
+		lo = mid - floor_w * 0.5
 	out_min[0] = lo
 	out_max[0] = hi
 
@@ -255,11 +288,11 @@ func _draw() -> void:
 		# The forming bar sits under the live line — keep it quiet.
 		if i == n - 1:
 			col = col.darkened(0.15)
-		var yh := _y_for(bh[i], price_top, price_h)
-		var yl := _y_for(bl[i], price_top, price_h)
+		var yh := clampf(_y_for(bh[i], price_top, price_h), price_top - 2.0, price_bot + 2.0)
+		var yl := clampf(_y_for(bl[i], price_top, price_h), price_top - 2.0, price_bot + 2.0)
 		draw_line(Vector2(xc, yh), Vector2(xc, yl), Color(col, 0.55), 1.0)
-		var y1 := _y_for(maxf(bo[i], bc[i]), price_top, price_h)
-		var y2 := _y_for(minf(bo[i], bc[i]), price_top, price_h)
+		var y1 := clampf(_y_for(maxf(bo[i], bc[i]), price_top, price_h), price_top, price_bot)
+		var y2 := clampf(_y_for(minf(bo[i], bc[i]), price_top, price_h), price_top, price_bot)
 		draw_rect(Rect2(xc - body_w / 2.0, y1, body_w, maxf(y2 - y1, 1.0)), Color(col, 0.45))
 
 	# Moving averages over the closes.
@@ -319,6 +352,23 @@ func _draw() -> void:
 		var vcol := UI.GREEN if bc[i] >= bo[i] else UI.RED
 		draw_rect(Rect2(xc - body_w / 2.0, vol_top + (vol_h - vh), body_w, vh),
 			Color(vcol, 0.35))
+
+	# X-axis dates (every 5th bar, at the bar's cell center).
+	if _bar_days.size() == n:
+		var last_year := 0
+		for i in range(from_i, n):
+			if (_seq0 + i) % 5 != 0:
+				continue
+			var xc := _bar_x(n - 1 - i)
+			if xc < 0.0 or xc > w - 34.0:
+				continue
+			var d := Time.get_datetime_dict_from_unix_time(_bar_days[i] * 86400)
+			var label := "%s %d" % [_MONTHS[d.month - 1], d.day]
+			if d.year != last_year:
+				label += " '%02d" % (d.year % 100)
+			last_year = d.year
+			draw_string(font, Vector2(xc - 20.0, bottom + 14), label,
+				HORIZONTAL_ALIGNMENT_CENTER, 44, 11, Color(UI.TEXT_DIM, 0.9))
 
 	# MACD panel.
 	draw_string(font, Vector2(6, macd_top + 12), "MACD 12/26/9",

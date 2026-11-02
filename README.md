@@ -1,4 +1,4 @@
-# Afterbell
+# Alleyway
 
 **▶ [Play now: https://infoe-labs.github.io/alleyway/](https://infoe-labs.github.io/alleyway/)**
 
@@ -18,16 +18,16 @@ replay studio): same OHLCV archive, rebuilt as a mobile-first web game.
   (**BUY / CASH / SHORT**) inside a 5–7 s window. Endless; your bankroll
   carries across calls. Bust → run over.
 - **Day Trader** — five sessions, one week. At every close you commit
-  overnight: **buy, cash, or short**. Settled at next close. Unlocks at
-  Broker rank.
+  overnight: **buy, cash, or short**. Settled at next close.
 - **Swing Trader** — months compressed to minutes, rebalance at each
-  checkpoint. Unlocks at Trader rank.
+  checkpoint.
 - **Hall of Fame** — curated famous weeks (Lehman, COVID capitulation,
   Flash Crash…) as fixed-seed levels with star records.
 
 Levels are `(mode, seed)` → date + pacing + horizons, so procedural content is
 endless yet reproducible: the same seed is the same level forever. Ranks
-(Intern → Market Wizard) unlock from your best bankroll.
+(Intern → Market Wizard) are pure honors earned from your best bankroll —
+every mode is playable from the start.
 
 ### Controls
 
@@ -103,7 +103,7 @@ game/
   src/screens/           title, mode select (+ Hall of Fame), rank record, play
   tests/                 headless logic tests + UI/flow smoke
 tools/                   build_data.py, make_icons.py, serve.py, e2e.mjs
-docs/decisions/          decision records (see 2026-11-01-afterbell-game.md)
+docs/decisions/          decision records (see 2026-11-01-alleyway-game.md)
 ```
 
 The chart's "live" feel is synthesized: each daily bar becomes a seeded

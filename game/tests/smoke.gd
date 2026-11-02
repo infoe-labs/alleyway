@@ -9,7 +9,7 @@ var game_state = null
 
 
 func _initialize() -> void:
-	print("── Afterbell smoke ──")
+	print("── Alleyway smoke ──")
 	# In -s mode autoload singletons exist under /root but are not registered
 	# as compile-time globals, so resolve them by node name.
 	await process_frame

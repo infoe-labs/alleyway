@@ -1,11 +1,11 @@
-# PROGRESS — Afterbell
+# PROGRESS — Alleyway
 
-> Status snapshot for a fresh session. Read this plus `docs/decisions/2026-11-01-afterbell-game.md` and you can work on this repo cold.
+> Status snapshot for a fresh session. Read this plus `docs/decisions/2026-11-01-alleyway-game.md` and you can work on this repo cold.
 > Last updated: 2026-11-02. Working tree clean, tests green, live site deployed.
 
 ## What this is
 
-**Afterbell** — a mobile-first, tap-to-trade web game built in Godot 4.7.2 (GDScript). It streams real historical SPY daily data as a "live" line chart ("as if looking at charts 3 years ago, in realtime"), gives you a few seconds per bar to go LONG / CASH / SHORT, and tracks your bankroll across Flappy-Bird-simple rounds. Spawns from a failed stock-trading replay project (`references/learn-stock-trading/`, kept read-only for reference).
+**Alleyway** — a mobile-first, tap-to-trade web game built in Godot 4.7.2 (GDScript). It streams real historical SPY daily data as a "live" line chart ("as if looking at charts 3 years ago, in realtime"), gives you a few seconds per bar to go LONG / CASH / SHORT, and tracks your bankroll across Flappy-Bird-simple rounds. Spawns from a failed stock-trading replay project (`references/learn-stock-trading/`, kept read-only for reference).
 
 **Live now:** https://infoe-labs.github.io/alleyway/ (repo `infoe-labs/alleyway`, `gh` CLI authenticated on this machine). PWA/add-to-home-screen works; served by GitHub Pages via CI-built export.
 
@@ -63,7 +63,7 @@ tools/
   make_icons.py        generates the PWA icon set
   serve.py             static server with correct wasm MIME (python http.server doesn't set it)
   e2e.mjs              Playwright e2e (see commands)
-docs/decisions/2026-11-01-afterbell-game.md   full decision record — read it
+docs/decisions/2026-11-01-alleyway-game.md   full decision record — read it
 .github/workflows/deploy.yml   CI: downloads Godot 4.7.2 + web templates (cached in ~/godot-cache
                                on the runner), --import, --export-release, actions/deploy-pages
 dist/                  local export output — GITIGNORED, purely a local artifact; CI builds its own
@@ -74,7 +74,7 @@ references/            old project (venv, node_modules, extra CSVs incl. QQQ/AAP
 
 - **Input:** only taps, or Tab (cycle BUY/CASH/SHORT pad) + Space/Enter (commit), Esc (quit). Handled via direct `KEY_TAB/KEY_SPACE/KEY_ENTER/KEY_ESCAPE` in `play_screen.gd` `_unhandled_input` — deliberately *no* InputMap actions. Pad buttons read left-to-right BUY/CASH/SHORT and Tab cycles in that order, BUY preselected. Chart tap toggles 4x fast-forward (per-round; `setup()` resets it).
 - **Decision language:** the game is BUY (go up) vs SHORT (go down) vs CASH — never "sell"/"long". `position_label()`, the pad, cards and blurbs all use BUY/SHORT/CASH. Quick Flip includes CASH too.
-- **Gameplay:** all-in staking per position; shorts liquidate at −100%; bust = game over. Rounds are snappy (20–35s). Ranks keyed on *best bankroll ever*: Intern $0 / Broker $12k (unlocks Day Trader) / Trader $16k (unlocks Swing) / Senior $40k / Fund Mgr $100k / Market Wizard $250k. Thresholds were deliberately eased in commit `cf80368` — don't tighten them back.
+- **Gameplay:** all-in staking per position; shorts liquidate at −100%; bust = game over. Rounds are snappy (20–35s). All three modes are playable immediately (per dev decision 2026-11-02: it's a fun game, no forced grinds) — `unlock_rank` is 0 everywhere; keep it that way. Ranks keyed on *best bankroll ever* are pure honors: Intern $0 / Broker $12k / Trader $16k / Senior $40k / Fund Mgr $100k / Market Wizard $250k.
 - **Determinism:** seed + ticker + dates fully determine a level (SplitMix32 everywhere). Keep it that way; tests assert it.
 - **Data:** SPY only for now, bundled binary. Multi-ticker = scriptable CSV ingest via `tools/build_data.py` then commit the `.bin`+manifest. `references/learn-stock-trading/data/exports/` has QQQ/AAPL CSVs ready when wanted.
 - **UI:** built in code only (single main.tscn). **ASCII-only strings** — the default font lacks ★▶🔒 glyphs (uses `*`, `>`, `<`, `-` instead). Palette/consts on `UI` (e.g. `UI.GREEN`, `UI.tint_button`, `UI.label`). `UI.label(text, size, color, wrap=false)` defaults to **AUTOWRAP_OFF + EXPAND_FILL** — autowrap is opt-in, otherwise labels in HBox/corner slots collapse to one character per line.
