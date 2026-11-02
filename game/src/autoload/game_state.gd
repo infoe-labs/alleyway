@@ -7,10 +7,10 @@ const SAVE_PATH := "user://profile.cfg"
 
 const RANKS: Array[Dictionary] = [
 	{"name": "Intern", "min": 0.0},
-	{"name": "Broker", "min": 15000.0},
-	{"name": "Trader", "min": 30000.0},
-	{"name": "Senior Trader", "min": 60000.0},
-	{"name": "Fund Manager", "min": 120000.0},
+	{"name": "Broker", "min": 12000.0},     # a few good Quick Flip calls -> Day Trader
+	{"name": "Trader", "min": 16000.0},     # then Swing
+	{"name": "Senior Trader", "min": 40000.0},
+	{"name": "Fund Manager", "min": 100000.0},
 	{"name": "Market Wizard", "min": 250000.0},
 ]
 
