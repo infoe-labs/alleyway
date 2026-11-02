@@ -61,6 +61,7 @@ func _ready() -> void:
 	title_box.add_child(lvl_lbl)
 	var sub_lbl := UI.label("%s · %s" % [level.mode.display_name, level.subtitle], 12, UI.TEXT_DIM)
 	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	sub_lbl.clip_text = true
 	title_box.add_child(sub_lbl)
 	_bankroll_label = UI.label(RoundRules.fmt_money(_starting_bankroll()), 22)
 	_bankroll_label.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -96,6 +97,7 @@ func _ready() -> void:
 
 	# --- chart ---
 	chart = PriceChart.new()
+	chart.configure(level.mode.ticks_per_bar)
 	chart.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	chart.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	chart.gui_input.connect(_on_chart_input)
@@ -150,7 +152,10 @@ func _starting_bankroll() -> float:
 # --- cards -------------------------------------------------------------------
 
 func _clear_card() -> void:
+	# Remove immediately (not just queue_free) so the panel never measures
+	# the outgoing card's children alongside the new ones.
 	for c in _card_box.get_children():
+		_card_box.remove_child(c)
 		c.queue_free()
 
 
@@ -180,9 +185,11 @@ func _show_intro() -> void:
 	_card_box.add_child(UI.label(level.subtitle, 14, UI.TEXT_DIM))
 	_card_box.add_child(UI.label("Bankroll %s" % RoundRules.fmt_money(_starting_bankroll()), 16))
 	if level.mode.allow_cash:
-		_card_box.add_child(UI.label("At each close, commit overnight:\nBUY long, sit in CASH, or SELL short.", 14, UI.TEXT_DIM))
+		_card_box.add_child(UI.label(
+			"Before each night, decide the move: BUY rides it up, SHORT profits from the fall, CASH sits it out.",
+			14, UI.TEXT_DIM, true))
 	_card_box.add_child(UI.label("seed #%d" % level.seed_value, 11, UI.TEXT_DIM))
-	var hint := "Tap BUY / SELL" + (" / CASH" if level.mode.allow_cash else "") + "\nTab switches · Space commits"
+	var hint := "Tap BUY / SHORT" + (" / CASH" if level.mode.allow_cash else "") + "\nTab switches - Space commits"
 	_card_box.add_child(UI.label(hint, 13, UI.TEXT_DIM))
 	_card_button("START SESSION", func() -> void:
 		_hide_card()
@@ -216,7 +223,7 @@ func _show_summary(info: Dictionary) -> void:
 	_card_box.add_child(UI.label("*".repeat(stars) + "·".repeat(3 - stars), 30, UI.GOLD))
 	var color := UI.GREEN if pct > 0 else (UI.RED if pct < 0 else UI.TEXT_DIM)
 	_card_box.add_child(UI.label("%s   (%s)" % [RoundRules.fmt_money(float(info["bankroll"])), RoundRules.fmt_pct(pct)], 22, color))
-	_card_box.add_child(UI.label("Buy & hold was %s over the same stretch" % RoundRules.fmt_pct(float(info["benchmark"])), 13, UI.TEXT_DIM))
+	_card_box.add_child(UI.label("Buy & hold was %s over the same stretch" % RoundRules.fmt_pct(float(info["benchmark"])), 13, UI.TEXT_DIM, true))
 	for r in info["settled"]:
 		var ret := float(r["ret"])
 		var line := "Day %d · %s · %s" % [int(r["day"]), RoundRules.position_label(int(r["pos"])), RoundRules.fmt_pct(ret)]
@@ -229,7 +236,7 @@ func _show_game_over(info: Dictionary) -> void:
 	_clear_card()
 	_card_box.add_child(UI.label("MARGIN CALL", 13, UI.RED))
 	_card_box.add_child(UI.label("You're out.", 26))
-	_card_box.add_child(UI.label("Bankroll hit %s. The market always collects." % RoundRules.fmt_money(float(info["bankroll"])), 14, UI.TEXT_DIM))
+	_card_box.add_child(UI.label("Bankroll hit %s. The market always collects." % RoundRules.fmt_money(float(info["bankroll"])), 14, UI.TEXT_DIM, true))
 	_card_button("BACK TO FLOOR", _back_to_select, UI.RED_DARK)
 	_show_card()
 
@@ -259,7 +266,13 @@ func _on_state_changed(state: int) -> void:
 
 func _on_session_started(index: int, first_price: float, reset_view: bool) -> void:
 	if reset_view:
-		chart.reset(first_price)
+		chart.reset()
+		chart.session_start_price = first_price
+		_pos_badge.text = ""
+		_bankroll_label.add_theme_color_override("font_color", UI.TEXT)
+		var first_bar := level.start_bar if index == 0 else level.checkpoint_bar(index - 1) + 1
+		var s := series()
+		chart.seed_history(s, maxi(0, first_bar - PriceChart.HIST_BARS), first_bar - 1)
 	else:
 		chart.session_start_price = first_price
 		chart.refresh_view(true)
@@ -267,7 +280,7 @@ func _on_session_started(index: int, first_price: float, reset_view: bool) -> vo
 
 
 func _on_tick(price: float, vol: float, bar: int, tick: int, in_gap: bool) -> void:
-	chart.push(price, vol)
+	chart.push(price, vol, bar, in_gap)
 	if in_gap:
 		_info_label.text = ">> OVERNIGHT"
 	elif level.mode.kind == ModeConfig.Kind.DAY_TRADER:
@@ -324,6 +337,9 @@ func _next_quick_round() -> void:
 	level = LevelGen.make(level.mode, randi(), MarketData.series)
 	flow.setup(level, series())
 	flow.bankroll = carry
+	# setup() keeps the machine parked in SETTLE after the card; begin() only
+	# fires from INTRO, so route through start() or the round never begins.
+	flow.start()
 	flow.begin()
 
 

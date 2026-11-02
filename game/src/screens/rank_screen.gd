@@ -49,9 +49,9 @@ func _ready() -> void:
 		rp.add_child(bar)
 		rp.add_child(UI.label("Best bankroll %s — %s at %s" % [
 			RoundRules.fmt_money(GameState.best_bankroll),
-			nxt["name"], RoundRules.fmt_money(need)], 13, UI.TEXT_DIM))
+			nxt["name"], RoundRules.fmt_money(need)], 13, UI.TEXT_DIM, true))
 	else:
-		rp.add_child(UI.label("Best bankroll %s — you've reached the top of the street." % RoundRules.fmt_money(GameState.best_bankroll), 13, UI.TEXT_DIM))
+		rp.add_child(UI.label("Best bankroll %s — you've reached the top of the street." % RoundRules.fmt_money(GameState.best_bankroll), 13, UI.TEXT_DIM, true))
 
 	var stats := PanelContainer.new()
 	col.add_child(stats)
@@ -78,7 +78,7 @@ func _ready() -> void:
 		var line := UI.label("%s  ·  %s  ·  %s  %s" % [
 			spec["title"], spec["date"], spec["mode"],
 			("*".repeat(stars) + "·".repeat(3 - stars)) if stars > 0 else "-"], 13,
-			UI.TEXT if stars > 0 else UI.TEXT_DIM)
+			UI.TEXT if stars > 0 else UI.TEXT_DIM, true)
 		line.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		col.add_child(line)
 

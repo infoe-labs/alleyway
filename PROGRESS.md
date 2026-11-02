@@ -29,18 +29,27 @@ game/                  Godot project (open THIS dir, not repo root)
                        tape.gd         deterministic OHLC→tick-path synthesis:
                                        O→L→H→C or O→H→L→C per day + overnight gap bridges
                                        (this is what makes daily bars feel like a live tape)
+                       indicators.gd   Indicators: sma/ema/macd(12,26,9)/bollinger over
+                                       PackedFloat32Array closes; NAN before warm-up.
+                                       NOTE: never name a param `signal` (reserved).
                        level_def.gd    LevelDef: everything a round needs
                        level_gen.gd    LevelGen.make(mode, seed, market) / make_curated(spec, mode, market)
                                        + CURATED_SPECS (Hall-of-Fame historical weeks)
                        mode_config.gd  ModeConfig Resource (Kind: QUICK_FLIP/DAY_TRADER/SWING)
                        round_rules.gd  RoundRules: LONG=1/CASH=0/SHORT=-1, settle(), stars_for(),
-                                       fmt_money(), fmt_pct() — static, test directly
+                                       fmt_money(), fmt_pct(), position_label() (BUY/SHORT/CASH)
   src/game/round_flow.gd  RoundFlow: THE unified round FSM, enum State {INTRO, WATCH, DECIDE,
                        RESOLVE, SETTLE, SUMMARY, GAME_OVER}. All three modes share it; modes
                        differ only by ModeConfig data (Quick Flip = K=2 case). Node-based FSM
-                       was considered and rejected (see decision doc).
+                       was considered and rejected (see decision doc). setup() resets ff_mult.
   src/ui/              ui_theme.gd (class_name UI — palette + theme/widget factories),
-                       price_chart.gd (PriceChart, Geometry2D line+fill), decision_bar.gd
+                       price_chart.gd (PriceChart — the whole terminal, one _draw pass:
+                         pre-seeded history candles via seed_history(series, from, to),
+                         live forming candle + intraday tick line (gap ticks excluded),
+                         EMA9/EMA21 + Bollinger(20,2) overlays, per-bar volume band,
+                         MACD(12,26/9) sub-panel, entry line, last-price tag.
+                         push(price, vol, bar, in_gap) from the flow's tick_pushed),
+                       decision_bar.gd (BUY/UP | CASH/SIT OUT | SHORT/DOWN pad)
   src/screens/         title_screen.gd, mode_select.gd, rank_screen.gd, play_screen.gd
                        (all plain Control scripts, built 100% in code)
   src/resources/modes/*.tres  three ModeConfig resources
@@ -63,11 +72,12 @@ references/            old project (venv, node_modules, extra CSVs incl. QQQ/AAP
 
 ## Core design facts (don't re-litigate without reading the decision doc)
 
-- **Input:** only taps, or Tab (cycle BUY/SELL/CASH pad) + Space/Enter (commit), Esc (quit). Handled via direct `KEY_TAB/KEY_SPACE/KEY_ENTER/KEY_ESCAPE` in `play_screen.gd` `_unhandled_input` — deliberately *no* InputMap actions.
+- **Input:** only taps, or Tab (cycle BUY/CASH/SHORT pad) + Space/Enter (commit), Esc (quit). Handled via direct `KEY_TAB/KEY_SPACE/KEY_ENTER/KEY_ESCAPE` in `play_screen.gd` `_unhandled_input` — deliberately *no* InputMap actions. Pad buttons read left-to-right BUY/CASH/SHORT and Tab cycles in that order, BUY preselected. Chart tap toggles 4x fast-forward (per-round; `setup()` resets it).
+- **Decision language:** the game is BUY (go up) vs SHORT (go down) vs CASH — never "sell"/"long". `position_label()`, the pad, cards and blurbs all use BUY/SHORT/CASH. Quick Flip includes CASH too.
 - **Gameplay:** all-in staking per position; shorts liquidate at −100%; bust = game over. Rounds are snappy (20–35s). Ranks keyed on *best bankroll ever*: Intern $0 / Broker $12k (unlocks Day Trader) / Trader $16k (unlocks Swing) / Senior $40k / Fund Mgr $100k / Market Wizard $250k. Thresholds were deliberately eased in commit `cf80368` — don't tighten them back.
 - **Determinism:** seed + ticker + dates fully determine a level (SplitMix32 everywhere). Keep it that way; tests assert it.
 - **Data:** SPY only for now, bundled binary. Multi-ticker = scriptable CSV ingest via `tools/build_data.py` then commit the `.bin`+manifest. `references/learn-stock-trading/data/exports/` has QQQ/AAPL CSVs ready when wanted.
-- **UI:** built in code only (single main.tscn). **ASCII-only strings** — the default font lacks ★▶🔒 glyphs (uses `*`, `>`, `<`, `-` instead). Palette/consts on `UI` (e.g. `UI.GREEN`, `UI.tint_button`, `UI.label`).
+- **UI:** built in code only (single main.tscn). **ASCII-only strings** — the default font lacks ★▶🔒 glyphs (uses `*`, `>`, `<`, `-` instead). Palette/consts on `UI` (e.g. `UI.GREEN`, `UI.tint_button`, `UI.label`). `UI.label(text, size, color, wrap=false)` defaults to **AUTOWRAP_OFF + EXPAND_FILL** — autowrap is opt-in, otherwise labels in HBox/corner slots collapse to one character per line.
 - **Pause/idle:** pause a round with `flow.set_process(false)` — `tree.paused` does NOT work here (screens are children of the Window, which ignores process mode).
 
 ## Commands (verified working on this machine)
@@ -85,6 +95,8 @@ references/            old project (venv, node_modules, extra CSVs incl. QQQ/AAP
 python3 tools/serve.py dist 8080 &        # must be serve.py — correct wasm MIME
 node tools/e2e.mjs                          # defaults to http://localhost:8080/index.html
 node tools/e2e.mjs https://infoe-labs.github.io/alleyway/   # against the live site
+# e2e drives two full quick-flip rounds: Tab/Space commit (CASH), Space on the
+# settle card (NEXT CALL regression), direct BUY tap regression; screenshots land in /tmp/opencode/e2e
 
 # Add a ticker:
 #   put CSV in tools/csv/, update symbol list in tools/build_data.py, run it, commit game/data/
@@ -103,10 +115,12 @@ Toolchain installed locally: Godot 4.7.2 at `~/tools/godot/godot`; web export te
 
 ## GDScript/UI gotchas (verified the hard way)
 
-- Autowrap Labels inside HBox collapse to 1-char width — give them `SIZE_EXPAND_FILL` or set `AUTOWRAP_OFF`.
+- Autowrap Labels inside HBox collapse to 1-char width — this is now structurally prevented: `UI.label` defaults AUTOWRAP_OFF/EXPAND_FILL, pass `wrap=true` intentionally.
+- This project treats certain warnings as errors: `var x := <Variant expr>` (inferred Variant) is a hard parse error — annotate explicitly, e.g. `var y: float = callable.call(i)`.
+- `signal` is reserved in GDScript (Signal class) — can't be used as a parameter/var name (`Indicators.macd` uses `sig_period`).
 - In `-s` scripts, autoload identifiers (MarketData, GameState) are NOT compile-time available — use `root.get_node_or_null("MarketData")`.
 - No `for k, v in dict` and no `not in` in GDScript — iterate keys, use `not x in` / `has()`.
-- `PriceChart` fill polygon needs a `Geometry2D.triangulate_polygon` guard (degenerate polygons crash triangulation).
+- PriceChart: keep overlays band-clipped — `_polyline` drops points outside the price band, candles/volume/MACD loops iterate only the last `VISIBLE_BARS+2` bars (iterating from the oldest bar and `break`ing off-screen skips *everything*), and the live line skips gap ticks.
 - Rounded corners fail triangulation on very thin StyleBox fills (see ProgressBar comment in `ui_theme.gd` — square corners there on purpose).
 
 ## Deferred / good next steps

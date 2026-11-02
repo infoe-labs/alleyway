@@ -62,6 +62,12 @@ func _initialize() -> void:
 	_check(play._overlay.visible, "settle card shown")
 	_check(is_finite(flow.bankroll) and flow.bankroll >= 0.0, "bankroll sane: %f" % flow.bankroll)
 
+	# Regression: tapping NEXT CALL must actually begin a new round. The flow
+	# sits in SETTLE behind the card; _next_quick_round has to route INTRO->begin.
+	play._next_quick_round()
+	_check(flow.state == RoundFlow.State.WATCH, "next call begins a fresh quick-flip round")
+	_check(play.chart.bar_count() > 5, "chart pre-seeds history candles (%d)" % play.chart.bar_count())
+
 	# Day trader flow smoke: 5 sessions, 4 decisions, then summary.
 	var dmode: ModeConfig = load("res://src/resources/modes/day_trader.tres")
 	var dlevel := LevelGen.make(dmode, 777, market.series)

@@ -15,6 +15,7 @@ func _initialize() -> void:
 	_test_tape()
 	_test_levels()
 	_test_rules()
+	_test_indicators()
 	print("── %s ──" % ("ALL PASS" if failures == 0 else "%d FAILURE(S)" % failures))
 	quit(0 if failures == 0 else 1)
 
@@ -154,3 +155,49 @@ func _test_rules() -> void:
 			"star thresholds")
 	check(RoundRules.fmt_money(-1234.5) == "-$1,235" or RoundRules.fmt_money(-1234.5) == "-$1,234",
 			"money formats with thousands separator (%s)" % RoundRules.fmt_money(-1234.5))
+	check(RoundRules.position_label(RoundRules.LONG) == "BUY"
+			and RoundRules.position_label(RoundRules.SHORT) == "SHORT"
+			and RoundRules.position_label(RoundRules.CASH) == "CASH",
+			"position labels read BUY / SHORT / CASH")
+
+
+func _test_indicators() -> void:
+	var flat := PackedFloat32Array()
+	flat.resize(60)
+	flat.fill(50.0)
+	var e := Indicators.ema(flat, 9)
+	check(is_nan(e[7]) and absf(e[59] - 50.0) < 0.0001, "ema flat holds, NAN before warm-up")
+
+	var src := PackedFloat32Array([1.0, 2.0, 3.0, 4.0, 5.0])
+	var s := Indicators.sma(src, 3)
+	check(is_nan(s[1]) and absf(s[2] - 2.0) < 0.0001 and absf(s[4] - 4.0) < 0.0001,
+			"sma window math")
+
+	var ramp := PackedFloat32Array()
+	for i in 80:
+		ramp.append(float(i))
+	var m := Indicators.macd(ramp, 12, 26, 9)
+	var ml: PackedFloat32Array = m["macd"]
+	var ms: PackedFloat32Array = m["signal"]
+	var mh: PackedFloat32Array = m["hist"]
+	check(is_finite(ml[79]) and ml[79] > 0.0, "macd positive on a rising ramp")
+	check(absf(ml[79] - ms[79] - mh[79]) < 0.0001, "macd hist = line - signal")
+	var mf := Indicators.macd(flat, 12, 26, 9)
+	var mfl: PackedFloat32Array = mf["macd"]
+	check(absf(mfl[59]) < 0.0001, "macd flat is zero")
+	var short := Indicators.macd(PackedFloat32Array([1.0, 2.0, 3.0]), 12, 26, 9)
+	var sl: PackedFloat32Array = short["macd"]
+	check(is_nan(sl[2]), "macd under warm-up is NAN")
+
+	var spy := MarketSeries.load_from("res://data/SPY.bin")
+	if spy != null:
+		var closes := PackedFloat32Array()
+		for i in range(60, 120):
+			closes.append(spy.closes[i])
+		var bb := Indicators.bollinger(closes, 20, 2.0)
+		var bu: PackedFloat32Array = bb["upper"]
+		var bm: PackedFloat32Array = bb["mid"]
+		var bll: PackedFloat32Array = bb["lower"]
+		check(bu[59] > bm[59] and bm[59] > bll[59], "bollinger bands bracket the mean")
+		var sma20 := Indicators.sma(closes, 20)
+		check(absf(bm[59] - sma20[59]) < 0.0001, "bollinger mid is the sma")

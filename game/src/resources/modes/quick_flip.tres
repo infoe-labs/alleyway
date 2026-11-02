@@ -21,6 +21,6 @@ horizon_max = 4
 sessions = 2
 segment_bars_min = 10
 segment_bars_max = 16
-allow_cash = false
+allow_cash = true
 start_bankroll = 10000.0
 bust_at = 50.0

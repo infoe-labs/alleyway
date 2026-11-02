@@ -6,7 +6,7 @@
 script = ExtResource("1_mode")
 id = "swing"
 display_name = "Swing Trader"
-blurb = "Months compressed to minutes. Rebalance long, cash, or short at every checkpoint."
+blurb = "Months compressed to minutes. Before each stretch: buy, cash, or short at every checkpoint."
 kind = 2
 unlock_rank = 2
 symbols = Array[String](["SPY"])

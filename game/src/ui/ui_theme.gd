@@ -67,14 +67,17 @@ static func build_theme() -> Theme:
 	return theme
 
 
-static func label(text: String, size: int = 17, color: Color = TEXT) -> Label:
+static func label(text: String, size: int = 17, color: Color = TEXT, wrap: bool = false) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_constant_override("line_spacing", MONO_GAP)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Autowrap is opt-in: an autowrapping Label with no width of its own
+	# (e.g. inside an HBox) collapses to one character per line.
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if wrap else TextServer.AUTOWRAP_OFF
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return l
 
 

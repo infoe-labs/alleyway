@@ -6,7 +6,7 @@
 script = ExtResource("1_mode")
 id = "day_trader"
 display_name = "Day Trader"
-blurb = "Five sessions. At every close, commit long, cash, or short overnight. Don't go bust by Friday."
+blurb = "Five sessions. At every close, decide the overnight move: buy, cash, or short. Don't go bust by Friday."
 kind = 1
 unlock_rank = 1
 symbols = Array[String](["SPY"])

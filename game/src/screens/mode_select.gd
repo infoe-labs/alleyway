@@ -69,7 +69,7 @@ func _mode_card(mode: ModeConfig) -> Control:
 		var pct_label := UI.label("best %s" % RoundRules.fmt_pct(float(best)), 13, UI.GOLD)
 		pct_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 		head.add_child(pct_label)
-	col.add_child(UI.label(mode.blurb, 13, UI.TEXT_DIM))
+	col.add_child(UI.label(mode.blurb, 13, UI.TEXT_DIM, true))
 
 	if not unlocked:
 		var lock := Button.new()
@@ -129,7 +129,9 @@ func _show_curated(mode: ModeConfig) -> void:
 		var stars := int(GameState.curated_stars.get(spec["id"], 0))
 		var row := HBoxContainer.new()
 		col.add_child(row)
-		row.add_child(UI.label(spec["title"], 17, UI.TEXT))
+		var title_lbl := UI.label(spec["title"], 17, UI.TEXT, true)
+		title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		row.add_child(title_lbl)
 		var star_lbl := UI.label("*".repeat(stars) + "·".repeat(3 - stars), 15, UI.GOLD)
 		star_lbl.size_flags_horizontal = Control.SIZE_SHRINK_END
 		row.add_child(star_lbl)

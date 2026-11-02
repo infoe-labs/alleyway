@@ -34,10 +34,10 @@ func _init(allow_cash: bool) -> void:
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(row)
 
-	_order.assign([OPT_SHORT])
+	_order.assign([OPT_LONG])
 	if allow_cash:
 		_order.append(OPT_CASH)
-	_order.append(OPT_LONG)
+	_order.append(OPT_SHORT)
 	for pos in _order:
 		var btn := Button.new()
 		btn.text = _label_for(pos)
@@ -67,11 +67,11 @@ func _init(allow_cash: bool) -> void:
 func _label_for(pos: int) -> String:
 	match pos:
 		OPT_LONG:
-			return "BUY"
+			return "BUY\nUP"
 		OPT_SHORT:
-			return "SELL"
+			return "SHORT\nDOWN"
 		_:
-			return "CASH"
+			return "CASH\nSIT OUT"
 
 
 func open_window(seconds: float) -> void:

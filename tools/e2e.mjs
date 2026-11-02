@@ -70,6 +70,20 @@ await shot("06-holding");
 await wait(6000); // reveal + settle card
 await shot("07-settle-card");
 
+// Regression: Space on the settle card must start a fresh round (was frozen).
+await page.keyboard.press("Space");
+await wait(3000);
+await shot("08-next-round");
+
+// Fresh round: fast-forward, then tap BUY directly (leftmost pad button).
+await page.mouse.click(210, 300); // chart -> 4x
+await wait(12000);
+await page.mouse.click(83, 786); // BUY
+await wait(1500);
+await shot("09-buy-tap");
+await wait(8000); // reveal + settle
+await shot("10-settle-2");
+
 const canvasOk = await page.evaluate(() => {
   const c = document.querySelector("canvas");
   return !!c && c.width > 0;

@@ -64,6 +64,7 @@ func setup(p_level: LevelDef, p_series: MarketSeries) -> void:
 	entries.clear()
 	settled_results.clear()
 	_streaming = false
+	ff_mult = 1  # each round starts at 1x; the tap-toggle is per round
 	_on_run_done = Callable()
 
 
