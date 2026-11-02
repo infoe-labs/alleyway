@@ -9,7 +9,7 @@ var failures := 0
 
 
 func _initialize() -> void:
-	print("── Afterbell tests ──")
+	print("── Alleyway tests ──")
 	_test_series()
 	_test_rng()
 	_test_tape()

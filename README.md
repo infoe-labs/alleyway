@@ -1,4 +1,4 @@
-# Afterbell
+# Alleyway
 
 **▶ [Play now: https://infoe-labs.github.io/alleyway/](https://infoe-labs.github.io/alleyway/)**
 
@@ -103,7 +103,7 @@ game/
   src/screens/           title, mode select (+ Hall of Fame), rank record, play
   tests/                 headless logic tests + UI/flow smoke
 tools/                   build_data.py, make_icons.py, serve.py, e2e.mjs
-docs/decisions/          decision records (see 2026-11-01-afterbell-game.md)
+docs/decisions/          decision records (see 2026-11-01-alleyway-game.md)
 ```
 
 The chart's "live" feel is synthesized: each daily bar becomes a seeded

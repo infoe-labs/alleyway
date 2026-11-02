@@ -1,11 +1,11 @@
-# PROGRESS — Afterbell
+# PROGRESS — Alleyway
 
-> Status snapshot for a fresh session. Read this plus `docs/decisions/2026-11-01-afterbell-game.md` and you can work on this repo cold.
+> Status snapshot for a fresh session. Read this plus `docs/decisions/2026-11-01-alleyway-game.md` and you can work on this repo cold.
 > Last updated: 2026-11-02. Working tree clean, tests green, live site deployed.
 
 ## What this is
 
-**Afterbell** — a mobile-first, tap-to-trade web game built in Godot 4.7.2 (GDScript). It streams real historical SPY daily data as a "live" line chart ("as if looking at charts 3 years ago, in realtime"), gives you a few seconds per bar to go LONG / CASH / SHORT, and tracks your bankroll across Flappy-Bird-simple rounds. Spawns from a failed stock-trading replay project (`references/learn-stock-trading/`, kept read-only for reference).
+**Alleyway** — a mobile-first, tap-to-trade web game built in Godot 4.7.2 (GDScript). It streams real historical SPY daily data as a "live" line chart ("as if looking at charts 3 years ago, in realtime"), gives you a few seconds per bar to go LONG / CASH / SHORT, and tracks your bankroll across Flappy-Bird-simple rounds. Spawns from a failed stock-trading replay project (`references/learn-stock-trading/`, kept read-only for reference).
 
 **Live now:** https://infoe-labs.github.io/alleyway/ (repo `infoe-labs/alleyway`, `gh` CLI authenticated on this machine). PWA/add-to-home-screen works; served by GitHub Pages via CI-built export.
 
@@ -63,7 +63,7 @@ tools/
   make_icons.py        generates the PWA icon set
   serve.py             static server with correct wasm MIME (python http.server doesn't set it)
   e2e.mjs              Playwright e2e (see commands)
-docs/decisions/2026-11-01-afterbell-game.md   full decision record — read it
+docs/decisions/2026-11-01-alleyway-game.md   full decision record — read it
 .github/workflows/deploy.yml   CI: downloads Godot 4.7.2 + web templates (cached in ~/godot-cache
                                on the runner), --import, --export-release, actions/deploy-pages
 dist/                  local export output — GITIGNORED, purely a local artifact; CI builds its own
