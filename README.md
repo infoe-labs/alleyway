@@ -8,8 +8,8 @@ A tap-only trading game built in Godot 4.7 that replays real SPY history as a
 live-looking tape. You watch the chart stream, then **tap BUY, CASH, or SHORT**
 before the clock runs out. Money is the score; going bust ends the run.
 
-Born from `references/learn-stock-trading/` ("Afterbell", a local market
-replay studio): same OHLCV archive, rebuilt as a mobile-first web game.
+Born from `references/learn-stock-trading/`, a local market replay
+studio: same OHLCV archive, rebuilt as a mobile-first web game.
 
 ## How it plays
 

@@ -67,6 +67,8 @@ func _initialize() -> void:
 	play._next_quick_round()
 	_check(flow.state == RoundFlow.State.WATCH, "next call begins a fresh quick-flip round")
 	_check(play.chart.bar_count() > 5, "chart pre-seeds history candles (%d)" % play.chart.bar_count())
+	_check(play.chart.visible_bars == 30 and not play.chart.intraday,
+			"quick flip chart keeps the 30-bar date view")
 
 	# Day trader flow smoke: 5 sessions, 4 decisions, then summary.
 	var dmode: ModeConfig = load("res://src/resources/modes/day_trader.tres")
@@ -76,6 +78,8 @@ func _initialize() -> void:
 	get_root().add_child(play2)
 	await process_frame
 	var dflow: RoundFlow = play2.flow
+	_check(play2.chart.visible_bars == 3 and play2.chart.intraday,
+			"day trader chart zooms the live day (clock axis)")
 	dflow.begin()
 	var decisions := 0
 	var guard := 0

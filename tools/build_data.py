@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert OHLCV CSV exports into the game's packed binary market format.
 
-Drop provider CSVs into tools/csv/ (same shape as the Afterbell exports:
+Drop provider CSVs into tools/csv/ (same shape as the original project's exports:
 columns date,open,high,low,close,volume; filename SYMBOL_1d_<...>.csv), run
 this script, and commit the generated files:
 

@@ -61,7 +61,10 @@ var _view_max := 1.0
 var _hover_x := NAN
 var _hover_y := NAN
 var _down := Vector2(1e9, 1e9)
+var _down_msec := 0
 var _tap_candidate := false
+const TAP_MAX_MS := 500      # hold longer than this = scrub intent, never FF
+const TAP_MAX_DIST := 12.0
 
 
 func _ready() -> void:
@@ -79,18 +82,21 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventScreenTouch:
 		if event.pressed:
 			_down = event.position
+			_down_msec = Time.get_ticks_msec()
 			_tap_candidate = true
 			_hover_x = event.position.x
 			_hover_y = event.position.y
 		else:
-			if _tap_candidate:
+			# Tap = short + still. A finger held down to read the popover is
+			# scrub intent and must never fast-forward the game.
+			if _tap_candidate and Time.get_ticks_msec() - _down_msec <= TAP_MAX_MS:
 				tap_tape.emit()
 			_hover_x = NAN
 			_hover_y = NAN
 		queue_redraw()
 		accept_event()
 	elif event is InputEventScreenDrag:
-		if event.position.distance_to(_down) > 12.0:
+		if event.position.distance_to(_down) > TAP_MAX_DIST:
 			_tap_candidate = false
 		_hover_x = event.position.x
 		_hover_y = event.position.y
@@ -300,7 +306,9 @@ func _draw() -> void:
 	var w := size.x
 	var n := bc.size()
 	var bar_w := w / float(visible_bars)
-	var body_w := maxf(bar_w * 0.62, 2.0)
+	# Cap bar widths: in the 3-bar day-trader view uncapped bodies become slabs.
+	var body_w := minf(maxf(bar_w * 0.62, 2.0), 56.0)
+	var thin_w := minf(maxf(bar_w * 0.45, 2.0), 22.0)
 
 	# Regions: price / volume / macd / rsi / date axis.
 	var price_top := size.y * PAD_TOP
@@ -417,7 +425,7 @@ func _draw() -> void:
 		var xc := _bar_x(n - 1 - i)
 		var vh := vol_h * (bv[i] / max_vol)
 		var vcol := UI.GREEN if bc[i] >= bo[i] else UI.RED
-		draw_rect(Rect2(xc - body_w / 2.0, vol_top + (vol_h - vh), body_w, vh),
+		draw_rect(Rect2(xc - thin_w / 2.0, vol_top + (vol_h - vh), thin_w, vh),
 			Color(vcol, 0.35))
 
 	_draw_x_axis(font, w, bar_w, n, from_i, bottom)
@@ -449,7 +457,7 @@ func _draw() -> void:
 					var hy := macd_top + macd_h * (1.0 - (macd_hist[i] - mlo) / (mhi - mlo))
 					var top := minf(hy, zero_y)
 					var hh := absf(hy - zero_y)
-					draw_rect(Rect2(xc - body_w / 2.0, top, body_w, maxf(hh, 1.0)),
+					draw_rect(Rect2(xc - thin_w / 2.0, top, thin_w, maxf(hh, 1.0)),
 						Color(UI.GREEN, 0.5) if macd_hist[i] >= 0.0 else Color(UI.RED, 0.5))
 			_polyline_macd(macd_line, w, bar_w, n, macd_top, macd_h, mlo, mhi, UI.CASH_BLUE)
 			_polyline_macd(macd_sig, w, bar_w, n, macd_top, macd_h, mlo, mhi, UI.GOLD)
@@ -500,13 +508,26 @@ func _draw_x_axis(font: Font, w: float, bar_w: float, n: int, from_i: int, botto
 	if intraday:
 		# 09:30 .. 16:00 across the live bar's cell, date under it.
 		var every := maxi(1, int(round(float(tpb) / 4.0)))
-		for t in range(0, tpb, every):
-			var x := w - (1.0 - (float(t) + 0.5) / float(tpb)) * bar_w
-			draw_string(font, Vector2(x - 20.0, bottom + 12),
-				MarketSeries.session_clock(t, tpb),
+		var clock_ticks: Array[int] = []
+		var t := 0
+		while t < tpb - 1:
+			clock_ticks.append(t)
+			t += every
+		clock_ticks.append(tpb - 1)
+		var drawn: Array = []  # [x, label] pairs kept, spaced >= 42px apart
+		for tt in clock_ticks:
+			var x := w - (1.0 - (float(tt) + 0.5) / float(tpb)) * bar_w
+			x = minf(x, w - 24.0)  # keep the last label inside the canvas
+			var is_last := tt == tpb - 1
+			if not drawn.is_empty() and x - float(drawn.back()[0]) < 34.0:
+				if not is_last:
+					continue  # would collide with the previous label
+				drawn.pop_back()  # the close label wins its slot
+			drawn.append([x, MarketSeries.session_clock(tt, tpb)])
+		for pair in drawn:
+			var x: float = pair[0]
+			draw_string(font, Vector2(x - 20.0, bottom + 12), String(pair[1]),
 				HORIZONTAL_ALIGNMENT_CENTER, 40, 10, Color(UI.TEXT_DIM, 0.9))
-		draw_string(font, Vector2(w - 42.0, bottom + 12), "16:00",
-			HORIZONTAL_ALIGNMENT_CENTER, 40, 10, Color(UI.TEXT_DIM, 0.9))
 		for i in range(from_i, n):
 			var xc := _bar_x(n - 1 - i)
 			if xc < 0.0 or xc > w - 16.0:
