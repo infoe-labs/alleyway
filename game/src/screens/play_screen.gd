@@ -280,7 +280,7 @@ func _on_session_started(index: int, first_price: float, reset_view: bool) -> vo
 
 
 func _on_tick(price: float, vol: float, bar: int, tick: int, in_gap: bool) -> void:
-	chart.push(price, vol, bar, in_gap)
+	chart.push(price, vol, bar, tick, in_gap)
 	if in_gap:
 		_info_label.text = ">> OVERNIGHT"
 	elif level.mode.kind == ModeConfig.Kind.DAY_TRADER:

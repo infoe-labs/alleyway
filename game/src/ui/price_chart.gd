@@ -29,7 +29,9 @@ var bl := PackedFloat32Array()
 var bc := PackedFloat32Array()
 var bv := PackedFloat32Array()
 
-var points := PackedFloat32Array()         # live tick line, right-anchored
+var points := PackedFloat32Array()         # live tick prices, newest last
+var point_u := PackedFloat32Array()         # each tick's absolute bar-space coord
+var _seq0 := 0                              # sequence number of bc[0] (trim-proof bar ids)
 
 var _live_bar_id := -1                     # series bar index of the forming bar
 var _ema9 := PackedFloat32Array()
@@ -51,7 +53,9 @@ func reset() -> void:
 	bc.clear()
 	bv.clear()
 	points.clear()
+	point_u.clear()
 	_live_bar_id = -1
+	_seq0 = 0
 	entry_price = -1.0
 	entry_label = ""
 	session_start_price = 0.0
@@ -76,30 +80,37 @@ func seed_history(series: MarketSeries, from_i: int, to_i: int) -> void:
 	queue_redraw()
 
 
-func push(price: float, bar_volume: float, bar: int, in_gap: bool) -> void:
+func push(price: float, bar_volume: float, bar: int, tick: int, in_gap: bool) -> void:
 	last_price = price
-	if not in_gap:
-		points.append(price)
-		var cap := 3 * tpb  # the line traces the live bar (+ a little overlap); history is candles
-		if points.size() > cap:
-			points = points.slice(points.size() - cap)
-	if not in_gap:
-		if bar != _live_bar_id:
-			_live_bar_id = bar
-			bo.append(price)
-			bh.append(price)
-			bl.append(price)
-			bc.append(price)
-			bv.append(bar_volume)
-			_trim_bars()
-			_refresh_indicators()
-		else:
-			var i := bc.size() - 1
-			bh[i] = maxf(bh[i], price)
-			bl[i] = minf(bl[i], price)
-			bc[i] = price
-			bv[i] = bar_volume
-			_refresh_indicators()
+	if in_gap:
+		refresh_view(false)
+		queue_redraw()
+		return
+	# Line ticks sit on the bar grid (bar-space coord), so the tape aligns
+	# exactly with the candles instead of sliding across them.
+	var frac := (float(tick) + 1.0) / float(tpb)
+	if bar != _live_bar_id:
+		_live_bar_id = bar
+		bo.append(price)
+		bh.append(price)
+		bl.append(price)
+		bc.append(price)
+		bv.append(bar_volume)
+		_trim_bars()
+		_refresh_indicators()
+	else:
+		var i := bc.size() - 1
+		bh[i] = maxf(bh[i], price)
+		bl[i] = minf(bl[i], price)
+		bc[i] = price
+		bv[i] = bar_volume
+		_refresh_indicators()
+	points.append(price)
+	point_u.append(float(_seq0 + bc.size() - 1) + frac)
+	var cap := 3 * tpb  # the line traces the live bar (+ a little overlap); history is candles
+	if points.size() > cap:
+		points = points.slice(points.size() - cap)
+		point_u = point_u.slice(point_u.size() - cap)
 	refresh_view(false)
 	queue_redraw()
 
@@ -121,6 +132,7 @@ func _trim_bars() -> void:
 		bl.remove_at(0)
 		bc.remove_at(0)
 		bv.remove_at(0)
+		_seq0 += 1
 
 
 func _refresh_indicators() -> void:
@@ -240,14 +252,15 @@ func _draw() -> void:
 		var xc := _bar_x(seq_from_end)
 		var up := bc[i] >= bo[i]
 		var col := UI.GREEN if up else UI.RED
+		# The forming bar sits under the live line — keep it quiet.
 		if i == n - 1:
-			col = col.lightened(0.15)  # the forming bar reads hotter
+			col = col.darkened(0.15)
 		var yh := _y_for(bh[i], price_top, price_h)
 		var yl := _y_for(bl[i], price_top, price_h)
-		draw_line(Vector2(xc, yh), Vector2(xc, yl), Color(col, 0.85), 1.0)
+		draw_line(Vector2(xc, yh), Vector2(xc, yl), Color(col, 0.55), 1.0)
 		var y1 := _y_for(maxf(bo[i], bc[i]), price_top, price_h)
 		var y2 := _y_for(minf(bo[i], bc[i]), price_top, price_h)
-		draw_rect(Rect2(xc - body_w / 2.0, y1, body_w, maxf(y2 - y1, 1.0)), Color(col, 0.8))
+		draw_rect(Rect2(xc - body_w / 2.0, y1, body_w, maxf(y2 - y1, 1.0)), Color(col, 0.45))
 
 	# Moving averages over the closes.
 	_polyline(_ema21, w, bar_w, n, func(i): return _y_for(_ema21[i], price_top, price_h),
@@ -263,31 +276,32 @@ func _draw() -> void:
 			draw_string(font, Vector2(6, ey - 6), entry_label,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UI.CASH_BLUE)
 
-	# Live tick line over the forming candle. Overnight gaps are drawn as a
-	# break, not a vertical scribble: steep segments are skipped.
+	# The tape itself: the hero visual. Ticks are placed on the bar grid
+	# (point_u), so the line traces exactly through its candles' cells.
 	var m := points.size()
+	var head := _seq0 + n - 1
 	if m >= 2:
-		var tick_step := bar_w / float(tpb)
 		var prev := Vector2(NAN, NAN)
 		for i in m:
-			var x := w - float(m - 1 - i) * tick_step
-			if x < -tick_step:
+			var x := w - (float(head) + 1.0 - point_u[i]) * bar_w
+			if x < -bar_w:
 				prev = Vector2(NAN, NAN)
 				continue
 			var p := Vector2(x, _y_for(points[i], price_top, price_h))
-			if is_finite(prev.x) and absf(p.y - prev.y) <= price_h * 0.2:
-				draw_line(prev, p, line_color, 1.75, true)
+			if is_finite(prev.x) and absf(p.y - prev.y) <= price_h * 0.25:
+				draw_line(prev, p, line_color, 2.5, true)
 			prev = p
 
-	# Head dot + price tag track the newest price even mid-gap.
+	# Head dot at the tape's end + price tag pinned right.
 	if m >= 1:
-		var head := Vector2(w - 1.0, _y_for(last_price, price_top, price_h))
-		draw_circle(head, 4.0, line_color)
-		draw_circle(head, 8.0, Color(line_color, 0.25))
+		var hx := w - (float(head) + 1.0 - point_u[m - 1]) * bar_w
+		var head_pt := Vector2(hx, _y_for(points[m - 1], price_top, price_h))
+		draw_circle(head_pt, 4.0, line_color)
+		draw_circle(head_pt, 8.0, Color(line_color, 0.25))
 		var tag := "%.2f" % last_price
 		var tag_size := Vector2(66, 26)
 		var tag_pos := Vector2(w - tag_size.x - 2,
-			clampf(head.y - tag_size.y / 2.0, price_top, price_bot - tag_size.y))
+			clampf(head_pt.y - tag_size.y / 2.0, price_top, price_bot - tag_size.y))
 		draw_rect(Rect2(tag_pos, tag_size), UI.BG)
 		draw_rect(Rect2(tag_pos, tag_size), line_color.darkened(0.2), false, 2.0)
 		draw_string(font, tag_pos + Vector2(6, 19), tag,

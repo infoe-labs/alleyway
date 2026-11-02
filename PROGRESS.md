@@ -120,7 +120,7 @@ Toolchain installed locally: Godot 4.7.2 at `~/tools/godot/godot`; web export te
 - `signal` is reserved in GDScript (Signal class) — can't be used as a parameter/var name (`Indicators.macd` uses `sig_period`).
 - In `-s` scripts, autoload identifiers (MarketData, GameState) are NOT compile-time available — use `root.get_node_or_null("MarketData")`.
 - No `for k, v in dict` and no `not in` in GDScript — iterate keys, use `not x in` / `has()`.
-- PriceChart: keep overlays band-clipped — `_polyline` drops points outside the price band, candles/volume/MACD loops iterate only the last `VISIBLE_BARS+2` bars (iterating from the oldest bar and `break`ing off-screen skips *everything*), and the live line skips gap ticks.
+- PriceChart: keep overlays band-clipped — `_polyline` drops points outside the price band, candles/volume/MACD loops iterate only the last `VISIBLE_BARS+2` bars (iterating from the oldest bar and `break`ing off-screen skips *everything*). The live line is pinned to the bar grid via `point_u` (bar-space coord from the tick index, trim-proof by `_seq0`) — never right-anchor it by raw tick count or it drifts across the candles. Line is the hero (2.5px); candles are muted context (0.45/0.55 alpha).
 - Rounded corners fail triangulation on very thin StyleBox fills (see ProgressBar comment in `ui_theme.gd` — square corners there on purpose).
 
 ## Deferred / good next steps
