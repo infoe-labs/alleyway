@@ -201,3 +201,19 @@ func _test_indicators() -> void:
 		check(bu[59] > bm[59] and bm[59] > bll[59], "bollinger bands bracket the mean")
 		var sma20 := Indicators.sma(closes, 20)
 		check(absf(bm[59] - sma20[59]) < 0.0001, "bollinger mid is the sma")
+
+	var up := PackedFloat32Array()
+	for i in 40:
+		up.append(float(i))
+	var ru := Indicators.rsi(up, 14)
+	check(is_nan(ru[13]) and absf(ru[39] - 100.0) < 0.0001, "rsi pins at 100 on a straight climb")
+	var down := PackedFloat32Array()
+	for i in 40:
+		down.append(float(40 - i))
+	var rd := Indicators.rsi(down, 14)
+	check(rd[39] < 0.0001, "rsi bottoms at 0 on a straight slide")
+	var zz := PackedFloat32Array()
+	for i in 40:
+		zz.append(50.0 + (1.0 if i % 2 == 0 else -1.0))
+	var rz := Indicators.rsi(zz, 14)
+	check(absf(rz[39] - 50.0) < 4.0, "rsi hovers near 50 on even chop (%.1f)" % rz[39])
