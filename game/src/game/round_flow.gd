@@ -37,6 +37,10 @@ var positions: Array[int] = []
 var entries: Array[float] = []
 var settled_results: Array[Dictionary] = []
 var last_price := 0.0
+var exit_stop := 0.0
+var exit_target := 0.0
+var _exit_reason := "checkpoint"
+var _best_return := 0.0
 var ff_mult := 1
 
 var _stream_bar := 0
@@ -63,6 +67,11 @@ func setup(p_level: LevelDef, p_series: MarketSeries) -> void:
 	positions.clear()
 	entries.clear()
 	settled_results.clear()
+	last_price = 0.0
+	exit_stop = 0.0
+	exit_target = 0.0
+	_acc = 0.0
+	_tick = 0
 	_streaming = false
 	ff_mult = 1  # each round starts at 1x; the tap-toggle is per round
 	_on_run_done = Callable()
@@ -130,7 +139,7 @@ func _begin_session(i: int) -> void:
 
 	var speed := level.bar_seconds
 	if i > 0 and level.mode.kind == ModeConfig.Kind.QUICK_FLIP:
-		speed = level.bar_seconds / maxf(level.reveal_speed, 0.5)
+		speed = maxf(2.4, level.bar_seconds / maxf(level.reveal_speed, 0.5))
 	_start_run(first_bar, level.checkpoint_bar(i), speed, i > 0,
 		_open_first_window if i == 0 else _settle_and_maybe_decide)
 	state = State.WATCH if i == 0 else State.RESOLVE
@@ -167,6 +176,8 @@ func _current_step_seconds() -> float:
 func _advance_tick() -> void:
 	if _in_gap:
 		_push(_gap[_tick], series.volumes[maxi(0, _stream_bar - 1)], _stream_bar - 1, _tick, true)
+		if not _streaming:
+			return
 		_tick += 1
 		if _tick >= _gap.size():
 			_in_gap = false
@@ -174,6 +185,8 @@ func _advance_tick() -> void:
 		return
 	var ticks := tape.bar_ticks(_stream_bar)
 	_push(ticks[_tick], series.volumes[_stream_bar], _stream_bar, _tick, false)
+	if not _streaming:
+		return
 	_tick += 1
 	if _tick >= ticks.size():
 		if _stream_bar >= _stream_to:
@@ -191,6 +204,14 @@ func _advance_tick() -> void:
 func _push(price: float, vol: float, bar: int, tick: int, in_gap: bool) -> void:
 	last_price = price
 	tick_pushed.emit(price, vol, bar, tick, in_gap)
+	if has_open_position():
+		var ret := float(live_position()["ret"])
+		_best_return = maxf(_best_return, ret)
+		var pos: int = positions.back()
+		if exit_stop > 0.0 and float(pos) * (price - exit_stop) <= 0.0:
+			_close_position("stop hit")
+		elif exit_target > 0.0 and float(pos) * (price - exit_target) >= 0.0:
+			_close_position("target hit")
 
 
 # --- state transitions ---------------------------------------------------------
@@ -200,13 +221,47 @@ func _open_first_window() -> void:
 
 
 func _open_window() -> void:
+	exit_stop = 0.0
+	exit_target = 0.0
 	state = State.DECIDE
 	_decision_total = level.decision_seconds
 	_decision_left = level.decision_seconds
 	window_opened.emit(level.decision_seconds)
 
 
-func _settle_and_maybe_decide() -> void:
+func has_open_position() -> bool:
+	return state == State.RESOLVE and positions.size() > settled_results.size()
+
+
+func live_position() -> Dictionary:
+	if not has_open_position():
+		return {}
+	return RoundRules.settle(bankroll, positions.back(), entries.back(), last_price)
+
+
+func exit_now() -> void:
+	if has_open_position() and positions.back() != RoundRules.CASH:
+		_close_position("manual exit")
+
+
+func set_exit_plan(stop_price: float, target_price: float) -> void:
+	if state == State.DECIDE:
+		exit_stop = stop_price
+		exit_target = target_price
+
+
+func _close_position(reason: String) -> void:
+	if not has_open_position():
+		return
+	_exit_reason = reason
+	_record_settlement()
+	if level.mode.kind == ModeConfig.Kind.QUICK_FLIP or bankroll <= level.mode.bust_at:
+		_streaming = false
+		_on_run_done = Callable()
+		_settle_and_maybe_decide()
+
+
+func _record_settlement() -> void:
 	var i := session_idx
 	var info := RoundRules.settle(bankroll, positions[i - 1], entries[i - 1], last_price)
 	info["index"] = i - 1
@@ -214,12 +269,20 @@ func _settle_and_maybe_decide() -> void:
 	info["entry"] = entries[i - 1]
 	info["exit"] = last_price
 	info["day"] = i + 1
+	info["exit_reason"] = _exit_reason
+	info["best_ret"] = maxf(_best_return, float(info["ret"]))
 	bankroll = info["bankroll"]
 	settled_results.append(info)
 	settled.emit(info)
 	var gs := get_node_or_null("/root/GameState")
 	if gs != null:
 		gs.record_settlement(info["pnl"])
+
+
+func _settle_and_maybe_decide() -> void:
+	var i := session_idx
+	if settled_results.size() < i:
+		_record_settlement()
 
 	if bankroll <= level.mode.bust_at:
 		state = State.GAME_OVER
@@ -245,6 +308,14 @@ func continue_decision(pos: int) -> void:
 
 
 func _commit(pos: int) -> void:
+	if pos not in [RoundRules.LONG, RoundRules.CASH, RoundRules.SHORT]:
+		return
+	_exit_reason = "checkpoint"
+	_best_return = 0.0
+	ff_mult = 1
+	if pos == RoundRules.CASH:
+		exit_stop = 0.0
+		exit_target = 0.0
 	positions.append(pos)
 	entries.append(last_price)
 	position_opened.emit(pos, last_price)

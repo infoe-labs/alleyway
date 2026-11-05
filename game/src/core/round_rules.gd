@@ -11,9 +11,9 @@ const SHORT := -1
 static func position_label(pos: int) -> String:
 	match pos:
 		LONG:
-			return "BUY"
+			return "CALL"
 		SHORT:
-			return "SHORT"
+			return "PUT"
 		_:
 			return "CASH"
 

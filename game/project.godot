@@ -4,7 +4,7 @@ config_version=5
 [application]
 
 config/name="Alleyway"
-config/description="Tap-to-trade historical market replay. Watch the tape, tap BUY or SELL."
+config/description="Tap-to-trade historical market replay. Watch the tape, tap CALL or PUT and manage your exit."
 run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"

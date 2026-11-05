@@ -66,6 +66,7 @@ func _initialize() -> void:
 	# sits in SETTLE behind the card; _next_quick_round has to route INTRO->begin.
 	play._next_quick_round()
 	_check(flow.state == RoundFlow.State.WATCH, "next call begins a fresh quick-flip round")
+	_check(play._subtitle_label.text.ends_with(play.level.subtitle), "next call refreshes displayed dates")
 	_check(play.chart.bar_count() > 5, "chart pre-seeds history candles (%d)" % play.chart.bar_count())
 	_check(play.chart.visible_bars == 30 and not play.chart.intraday,
 			"quick flip chart keeps the 30-bar date view")
@@ -99,6 +100,8 @@ func _initialize() -> void:
 	_check(dflow.state == RoundFlow.State.SUMMARY, "day trader reaches SUMMARY")
 	_check(dflow.settled_results.size() == 4, "day trader settles 4 positions")
 
+	_test_exits(mode, dmode)
+
 	print("── %s ──" % ("SMOKE PASS" if failures == 0 else "%d SMOKE FAILURE(S)" % failures))
 	quit(0 if failures == 0 else 1)
 
@@ -109,3 +112,70 @@ func _check(cond: bool, label: String) -> void:
 	else:
 		failures += 1
 		printerr(" FAIL %s" % label)
+
+
+func _test_exits(quick: ModeConfig, day: ModeConfig) -> void:
+	var swing: ModeConfig = load("res://src/resources/modes/swing.tres")
+	for mode in [quick, day, swing]:
+		for pos in [RoundRules.LONG, RoundRules.SHORT]:
+			var f := RoundFlow.new()
+			root.add_child(f)
+			f.set_process(false)
+			var l := LevelGen.make(mode, 2026, market.series)
+			f.setup(l, market.get_series(l.symbol))
+			f.begin()
+			f.skip_stream()
+			f.continue_decision(pos)
+			f._process(1.0)
+			f._push(f.entries[0] * (1.01 if pos == RoundRules.LONG else 0.99), 0.0, 0, 0, false)
+			var expected := float(f.live_position()["bankroll"])
+			f.exit_now()
+			_check(f.settled_results.size() == 1 and absf(f.bankroll - expected) < 0.01,
+				"%s %s: manual exit locks current P&L" % [mode.id, RoundRules.position_label(pos)])
+			f.exit_now()
+			f.skip_stream()
+			_check(f.settled_results.size() == 1 and f.bankroll == expected, "exit cannot settle twice or change during remaining tape")
+			if mode != quick:
+				f._process(10.0)
+				_check(f.state == RoundFlow.State.DECIDE, "early exit preserves next decision")
+			f.free()
+	# Test both sides and both bracket triggers, including a gap through a stop.
+	for pos in [RoundRules.LONG, RoundRules.SHORT]:
+		for target in [false, true]:
+			var f := RoundFlow.new()
+			root.add_child(f)
+			f.set_process(false)
+			var l := LevelGen.make(quick, 77, market.series)
+			f.setup(l, market.get_series(l.symbol))
+			f.begin()
+			f.skip_stream()
+			var entry := f.last_price
+			f.set_exit_plan(entry - pos * 1.0, entry + pos * 2.0)
+			f.continue_decision(pos)
+			f._process(1.0)
+			var fill: float = entry + pos * (2.5 if target else -1.5)
+			f._push(fill, 0.0, 0, 0, not target)
+			_check(f.state == RoundFlow.State.SETTLE and f.settled_results.size() == 1,
+				"%s bracket closes on %s" % [RoundRules.position_label(pos), "target" if target else "stop"])
+			_check(absf(float(f.settled_results[0]["exit"]) - fill) < 0.001, "bracket fills at observed price, including gaps")
+			f.free()
+
+	var streamed := RoundFlow.new()
+	root.add_child(streamed)
+	streamed.set_process(false)
+	var stream_level := LevelGen.make(quick, 99, market.series)
+	streamed.setup(stream_level, market.get_series(stream_level.symbol))
+	streamed.begin()
+	streamed.skip_stream()
+	streamed.set_exit_plan(streamed.last_price * 1.5, 0.0)
+	streamed.continue_decision(RoundRules.LONG)
+	streamed._process(1.0)
+	streamed.skip_stream()
+	_check(streamed.settled_results.size() == 1 and not streamed._streaming, "bracket interrupts real streaming safely")
+	streamed.setup(stream_level, market.get_series(stream_level.symbol))
+	streamed.start()
+	streamed.begin()
+	streamed.skip_stream()
+	streamed._process(100.0)
+	_check(streamed.positions[0] == RoundRules.CASH and streamed.exit_stop == 0.0, "timeout after reset safely sits out with no stale bracket")
+	streamed.free()
