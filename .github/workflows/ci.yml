@@ -28,6 +28,7 @@ jobs:
         run: |
           python3 -m py_compile tools/*.py
           for script in tools/ci/*.sh; do bash -n "$script"; done
+          shellcheck tools/ci/*.sh
       - name: Verify market data is reproducible
         run: |
           python3 tools/build_data.py
@@ -122,6 +123,7 @@ jobs:
             if curl --fail --silent http://localhost:8080/index.html > /dev/null; then
               break
             fi
+            echo "Waiting for web server ($attempt/30)"
             sleep 1
           done
           curl --fail --silent http://localhost:8080/index.html > /dev/null
