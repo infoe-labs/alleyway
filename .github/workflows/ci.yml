@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Workflow and data checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate GitHub workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
+      - name: Check Python and shell syntax
+        run: |
+          python3 -m py_compile tools/*.py
+          for script in tools/ci/*.sh; do bash -n "$script"; done
+          shellcheck tools/ci/*.sh
+      - name: Verify market data is reproducible
+        run: |
+          python3 tools/build_data.py
+          git diff --exit-code -- game/data
+      - name: Check whitespace
+        run: git diff --check
+
+  game:
+    name: Godot tests and web export
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GODOT_VERSION: 4.7.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare isolated tool and user-data paths
+        run: |
+          echo "GODOT_CACHE=$RUNNER_TOOL_CACHE/alleyway-godot/$GODOT_VERSION" >> "$GITHUB_ENV"
+          echo "XDG_DATA_HOME=$RUNNER_TEMP/alleyway-userdata" >> "$GITHUB_ENV"
+      - name: Cache Godot and web templates
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GODOT_CACHE }}
+          key: godot-${{ runner.os }}-${{ runner.arch }}-${{ env.GODOT_VERSION }}-web-v2
+      - name: Install verified Godot release
+        run: tools/ci/install-godot.sh "$GODOT_VERSION" "$GODOT_CACHE"
+      - name: Import game
+        run: tools/ci/run-godot.sh import --import
+      - name: Test data, indicators, tape, and trading rules
+        run: tools/ci/run-godot.sh logic -s res://tests/run_tests.gd
+      - name: Test screens, round flows, and exits
+        run: tools/ci/run-godot.sh smoke -s res://tests/smoke.gd
+      - name: Export release web build
+        run: |
+          mkdir -p dist
+          tools/ci/run-godot.sh export --export-release Web ../dist/index.html
+          test -s dist/index.html
+          test -s dist/index.wasm
+          test -s dist/index.pck
+      - name: Upload web build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-build
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload Godot logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: godot-logs
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  browser:
+    name: Browser gameplay checks (${{ matrix.width }}px)
+    needs: game
+    strategy:
+      fail-fast: false
+      matrix:
+        width: [420, 1280]
+    env:
+      E2E_WIDTH: ${{ matrix.width }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install browser test dependencies
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-build
+          path: dist
+      - name: Exercise exported game in Chromium
+        run: |
+          mkdir -p test-results
+          python3 tools/serve.py dist 8080 > test-results/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:8080/index.html > /dev/null; then
+              break
+            fi
+            echo "Waiting for web server ($attempt/30)"
+            sleep 1
+          done
+          curl --fail --silent http://localhost:8080/index.html > /dev/null
+          npm run test:e2e
+      - name: Upload browser screenshots, traces, and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-results-${{ matrix.width }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 7

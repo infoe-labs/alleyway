@@ -12,3 +12,8 @@ dist/
 # OS/editor noise
 .DS_Store
 *~
+
+# Local CI dependencies and reports
+node_modules/
+test-results/
+__pycache__/
