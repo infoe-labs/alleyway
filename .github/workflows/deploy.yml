@@ -7,70 +7,37 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Restore Godot cache
-        uses: actions/cache@v4
-        with:
-          path: ~/godot-cache
-          key: godot-4.7.2-web-v1
-
-      - name: Install Godot + web export templates
-        run: |
-          set -e
-          V=4.7.2
-          BASE=https://github.com/godotengine/godot/releases/download/${V}-stable
-          mkdir -p ~/godot-cache
-          if [ ! -x ~/godot-cache/godot ]; then
-            curl -sLo /tmp/godot.zip $BASE/Godot_v${V}-stable_linux.x86_64.zip
-            unzip -q /tmp/godot.zip -d /tmp/godotbin
-            mv /tmp/godotbin/Godot_v${V}-stable_linux.x86_64 ~/godot-cache/godot
-            chmod +x ~/godot-cache/godot
-          fi
-          TPL=~/.local/share/godot/export_templates/${V}.stable
-          mkdir -p $TPL
-          if [ ! -f ~/godot-cache/templates/web_nothreads_release.zip ]; then
-            curl -sLo /tmp/t.tpz $BASE/Godot_v${V}-stable_export_templates.tpz
-            unzip -q /tmp/t.tpz 'templates/web_*' 'templates/version.txt' -d /tmp/tpl
-            mv /tmp/tpl/templates ~/godot-cache/templates
-          fi
-          cp ~/godot-cache/templates/* $TPL/
-
-      - name: Import project
-        run: ~/godot-cache/godot --headless --path game --import
-
-      - name: Tests
-        run: |
-          ~/godot-cache/godot --headless --path game -s res://tests/run_tests.gd
-          timeout 90 ~/godot-cache/godot --headless --path game -s res://tests/smoke.gd
-
-      - name: Export Web build
-        run: |
-          mkdir -p dist
-          ~/godot-cache/godot --headless --path game --export-release "Web" ../dist/index.html
-          ls -la dist
-
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: dist
+  checks:
+    name: Validate release
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
 
   deploy:
-    needs: build
+    name: Publish tested web build
+    needs: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-build
+          path: dist
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

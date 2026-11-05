@@ -1,152 +1,114 @@
-// Local dev E2E: boots the exported web build in headless Chromium, drives a
-// Quick Flip round (menu via Tab/Enter focus nav, gameplay via Space/Tab),
-// and writes screenshots for visual review.
-//
-//   python3 tools/serve.py dist 8080 &
-//   node tools/e2e.mjs
-import { createRequire } from "node:module";
-import { existsSync, mkdirSync } from "node:fs";
+// Assert real input-driven gameplay in the exported Web build.
+// npm ci && npx playwright install chromium
+// python3 tools/serve.py dist 8080 & npm run test:e2e
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { chromium } from "playwright";
 
-let chromium;
-const localRequire = createRequire(import.meta.url);
-const localPlaywright = "/home/seong/git/alleyway/references/learn-stock-trading/node_modules/playwright";
-if (existsSync(localPlaywright)) {
-  chromium = localRequire(localPlaywright).chromium;
-} else {
-  ({ chromium } = await import("playwright"));
-}
-
-const OUT = "/tmp/opencode/e2e";
-mkdirSync(OUT, { recursive: true });
-const URL = process.argv[2] || "http://localhost:8080/index.html";
-
+const out = process.env.E2E_OUTPUT || "test-results/browser";
+mkdirSync(out, { recursive: true });
+const url = new URL(process.argv[2] || "http://localhost:8080/index.html");
+url.searchParams.set("e2e", "1");
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
+const context = await browser.newContext({
+  viewport: { width: Number(process.env.E2E_WIDTH || 420), height: 900 },
+});
+await context.tracing.start({ screenshots: true, snapshots: true });
+const page = await context.newPage();
 const errors = [];
-page.on("console", (m) => {
-  if (m.type() === "error") errors.push(m.text());
+page.on("pageerror", e => errors.push(String(e)));
+page.on("console", m => {
+  // Ignore only known harmless audio autoplay messages; resource/engine errors fail CI.
+  if (m.type() === "error" && !/AudioContext.*(allowed|suspended)|Autoplay/i.test(m.text())) {
+    errors.push(m.text());
+  }
 });
-page.on("pageerror", (e) => errors.push(String(e)));
-
-const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
-const wait = (ms) => page.waitForTimeout(ms);
-
-await page.goto(URL, { waitUntil: "load", timeout: 60000 });
-await page.click("canvas", { position: { x: 210, y: 800 } }).catch(() => {});
-await wait(9000); // engine boot
-await shot("01-title");
-
-// Title -> mode select: Tab focuses PLAY, Enter activates.
-await page.keyboard.press("Tab");
-await wait(300);
-await page.keyboard.press("Enter");
-await wait(1500);
-await shot("02-mode-select");
-
-// Mode select -> Quick Flip intro: Tab past back, focus "Open the market".
-await page.keyboard.press("Tab"); // back
-await page.keyboard.press("Tab"); // open the market
-await page.keyboard.press("Enter");
-await wait(2000);
-await shot("03-intro-card");
-
-// Start the session (Space handled by PlayScreen during INTRO).
-await page.keyboard.press("Space");
-await wait(2500);
-await shot("04-watch");
-
-// Tap the chart to 4x fast-forward the warmup until the decision window.
-await page.mouse.click(210, 450);
-await page.mouse.click(389, 34); // skip warmup, retain full decision window
-await wait(400);
-await shot("05-decide");
-
-// CASH is selected by default; Tab selects PUT, Space commits.
-await page.keyboard.press("Tab");
-await wait(400);
-await page.keyboard.press("Space");
-await wait(500);
-await shot("06-holding");
-
-await page.keyboard.press("x"); // player-controlled exit at the live price
-await wait(400);
-await shot("07-settle-card");
-
-// Regression: Space on the settle card must start a fresh round (was frozen).
-await page.keyboard.press("Space");
-await wait(3000);
-await shot("08-next-round");
-
-// Fresh round: skip warmup, then tap CALL directly (leftmost pad button).
-await page.mouse.click(210, 300); // chart -> 4x
-await page.mouse.click(389, 34);
-await wait(400);
-await page.mouse.click(83, 786); // CALL
-await wait(500);
-await shot("09-call-tap");
-await page.keyboard.press("x");
-await wait(400); // manual exit or bracket settlement
-await shot("10-settle-2");
-
-// Reload for a clean state, then keyboard-navigate into Day Trader mode
-// (focus order on mode select: back, QF open, QF hall, DT open).
-await page.reload({ waitUntil: "load" });
-await page.click("canvas", { position: { x: 210, y: 800 } }).catch(() => {});
-await wait(9000); // engine boot
-await page.keyboard.press("Tab");  // PLAY on title
-await wait(250);
-await page.keyboard.press("Enter");
-await wait(1500);
-await shot("11-mode-select");
-for (let i = 0; i < 4; i++) { await page.keyboard.press("Tab"); await wait(200); }
-await page.keyboard.press("Enter"); // Day Trader "Open the market"
-await wait(1500);
-await shot("12-dt-intro");
-await page.keyboard.press("Space"); // START SESSION
-await wait(800);
-
-// Finger-drag while the tape streams: popover must appear, FF must NOT toggle.
-await page.mouse.move(180, 300);
-await page.mouse.down();
-await page.mouse.move(300, 320, { steps: 8 });
-await wait(600); // held well past the tap threshold
-await shot("13a-dt-scrub-watch");
-await page.mouse.up();
-
-await page.mouse.click(210, 300); // quick tap -> 4x fast-forward
-await wait(5000);
-await shot("13-dt-watch");
-await page.mouse.click(396, 33); // ">>" if still streaming
-await wait(1200);
-await shot("14-dt-decide");
-
-// Scrub the crosshair across the day's candles.
-await page.mouse.move(230, 300);
-await page.mouse.down();
-await page.mouse.move(300, 260, { steps: 6 });
-await wait(400);
-await shot("15-dt-scrub");
-await page.mouse.up();
-
-const canvasOk = await page.evaluate(() => {
-  const c = document.querySelector("canvas");
-  return !!c && c.width > 0;
+page.on("requestfailed", request => errors.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText}`));
+page.on("response", response => {
+  if (response.status() >= 400) errors.push(`HTTP ${response.status()} ${response.url()}`);
 });
+const snapshot = () => page.evaluate(() => window.__alleyway);
+const waitFor = async expected => {
+  console.log("Expect:", expected);
+  await page.waitForFunction(expected => Object.entries(expected).every(
+    ([key, value]) => window.__alleyway?.[key] === value,
+  ), expected, { timeout: 45000 });
+  return snapshot();
+};
+const clickControl = async key => {
+  const state = await snapshot();
+  assert.ok(Array.isArray(state[key]), `Missing control: ${key}`);
+  await page.mouse.click(...state[key]);
+};
+const shot = name => page.screenshot({ path: `${out}/${name}.png` });
 
-console.log("canvas:", canvasOk ? "ok" : "MISSING");
-const realErrors = errors.filter(
-  (e) => !/Autoplay|AudioContext|favicon|Service Worker|manifest|WebGL|GPU stall|ERR_|Failed to load resource/i.test(e)
-);
-// join consecutive ERROR/at: lines for readable stacks
-const stacks = [];
-for (const e of realErrors) {
-  if (e.trimStart().startsWith("at:")) {
-    if (stacks.length) stacks[stacks.length - 1] += "\n    " + e.trim();
-  } else stacks.push(e.trim());
+try {
+  const response = await page.goto(url.href, { waitUntil: "load" });
+  assert.equal(response.status(), 200);
+  await waitFor({ screen: "title_screen" });
+  assert.ok(await page.locator("canvas").evaluate(c => c.width > 0 && c.height > 0));
+  await shot("01-title");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await waitFor({ screen: "mode_select" });
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await waitFor({ screen: "play_screen", state: "INTRO" });
+  await page.keyboard.press("Space");
+  await waitFor({ state: "WATCH" });
+  await page.keyboard.press("Escape");
+  await waitFor({ paused: true });
+  await page.keyboard.press("Escape");
+  await waitFor({ paused: false });
+  await clickControl("_skip_btn");
+  await waitFor({ state: "DECIDE" });
+  await shot("02-decision");
+  // Select manual management so a bracket cannot settle before the exit assertion.
+  await clickControl("_plan_picker");
+  await waitFor({ plan_open: true });
+  await clickControl("manual_plan");
+  await waitFor({ plan: 0 });
+  await page.keyboard.press("Tab"); // CASH -> PUT
+  await page.keyboard.press("Space");
+  await waitFor({ state: "RESOLVE", position: -1 });
+  await shot("03-put-open");
+  await page.keyboard.press("x");
+  let state = await waitFor({ state: "SETTLE", settled: 1, exit_reason: "manual exit" });
+  assert.ok(Number.isFinite(state.bankroll) && state.bankroll > 0);
+  await shot("04-manual-exit");
+  await page.keyboard.press("Space");
+  await waitFor({ state: "WATCH", settled: 0 });
+  await clickControl("_skip_btn");
+  await waitFor({ state: "DECIDE" });
+  await clickControl("call_button");
+  await waitFor({ state: "RESOLVE", position: 1 });
+  await clickControl("_exit_button");
+  await waitFor({ state: "SETTLE", settled: 1, exit_reason: "manual exit" });
+  await shot("05-call-exit");
+
+  // A clean reload exercises browser persistence and Day Trader screen construction.
+  await page.reload({ waitUntil: "load" });
+  await waitFor({ screen: "title_screen" });
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await waitFor({ screen: "mode_select" });
+  for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await waitFor({ screen: "play_screen", state: "INTRO" });
+  await page.keyboard.press("Space");
+  await waitFor({ state: "WATCH" });
+  await clickControl("_skip_btn");
+  await waitFor({ state: "DECIDE" });
+  await shot("06-day-trader");
+  assert.deepEqual(errors, [], "Browser or Godot reported errors");
+  console.log("E2E PASS: boot, navigation, pause, PUT/CALL, keyboard/tap exits, next round, reload, Day Trader");
+} catch (error) {
+  await shot("failure").catch(() => {});
+  throw error;
+} finally {
+  writeFileSync(`${out}/console.json`, JSON.stringify(errors, null, 2));
+  writeFileSync(`${out}/state.json`, JSON.stringify((await snapshot().catch(() => null)) ?? null, null, 2));
+  await context.tracing.stop({ path: `${out}/trace.zip` });
+  await browser.close();
 }
-console.log("console errors:", stacks.length);
-for (const e of stacks.slice(0, 6)) console.log("  -", e.slice(0, 2000), "\n");
-await browser.close();
-console.log(stacks.length === 0 && canvasOk ? "E2E OK — screenshots in " + OUT : "E2E saw problems");
-
-if (stacks.length || !canvasOk) process.exitCode = 1;

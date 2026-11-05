@@ -77,7 +77,9 @@ Tests (also run in CI):
 ```sh
 godot --headless --path game -s res://tests/run_tests.gd   # logic contracts
 godot --headless --path game -s res://tests/smoke.gd       # screens + flow
-node tools/e2e.mjs                                         # headless browser (needs playwright)
+npm ci && npx playwright install chromium
+# In a separate terminal: python3 tools/serve.py dist 8080
+npm run test:e2e                                          # real browser gameplay assertions
 ```
 
 ## Web / PWA / mobile install
@@ -129,10 +131,36 @@ independently of the closing direction, avoiding a synthetic tell. Same seed on 
 reproduces every tick, which is what makes levels shareable and tests
 meaningful.
 
-## Deployment
+## CI and deployment
 
-Pushing to `main` runs `.github/workflows/deploy.yml`: imports the project,
-runs both test suites, exports the no-threads Web build, and publishes `dist/`
-to GitHub Pages (Settings → Pages → Source: **GitHub Actions**, one time).
+Pull requests to `main` run `.github/workflows/ci.yml`:
+
+- **Workflow and data checks**: actionlint, Python/shell syntax, and rebuilding
+  the market archive to verify committed data matches its CSV source.
+- **Godot tests and web export**: import, logic tests, screen/flow tests, and
+  release export using Godot 4.7.2. The runner checks log errors as well as exit
+  codes and requires each test suite's success marker.
+- **Browser gameplay checks (420px / 1280px)**: Chromium boots the exported
+  build and asserts navigation, pause/resume, CALL/PUT entries, keyboard/tap
+  exits, next-round behavior, reload, and Day Trader navigation. Failed network
+  requests and browser/engine errors fail the check.
+
+Runs retain Godot logs, browser screenshots, console output, and Playwright
+traces for seven days. Browser assertions use read-only state snapshots enabled
+only by `?e2e=1`; all actions still use real keyboard/mouse input. Browser
+packages are locked in `package-lock.json`. Actions are pinned to commit SHAs,
+with weekly Dependabot updates for Actions and browser dependencies.
+
+The deployment workflow calls this same CI workflow on `main` and publishes
+its tested `web-build` artifact only after all checks pass. PRs have read-only
+repository permissions; Pages/OIDC permissions belong only to the deployment
+job. Manual deployment is restricted to `main`.
+
+To enforce these checks before merging, select the named checks above in the
+repository's branch protection/ruleset for `main`.
+
+
+Pushing to `main` runs `.github/workflows/deploy.yml`, validates the release,
+and publishes it to GitHub Pages (Settings → Pages → Source: **GitHub Actions**, one time).
 
 After the first deploy: [https://infoe-labs.github.io/alleyway/](https://infoe-labs.github.io/alleyway/).
