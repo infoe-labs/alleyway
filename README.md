@@ -5,7 +5,7 @@
 *The market, years ago, in realtime — right now.*
 
 A tap-only trading game built in Godot 4.7 that replays real SPY history as a
-live-looking tape. You watch the chart stream, then **tap BUY, CASH, or SHORT**
+live-looking tape. You watch the chart stream, then **tap CALL, CASH, or PUT**
 before the clock runs out. Money is the score; going bust ends the run.
 
 Born from `references/learn-stock-trading/`, a local market replay
@@ -15,10 +15,10 @@ studio: same OHLCV archive, rebuilt as a mobile-first web game.
 
 - **Quick Flip** — one read of the tape. Watch ~20 s of synthesized live
   price action from a random historical window, then call the next move
-  (**BUY / CASH / SHORT**) inside a 5–7 s window. Endless; your bankroll
+  (**CALL / CASH / PUT**) inside a roughly 9–14 s window. Endless; your bankroll
   carries across calls. Bust → run over.
 - **Day Trader** — five sessions, one week. At every close you commit
-  overnight: **buy, cash, or short**. Settled at next close.
+  overnight: **call, cash, or put**. Settled at next close.
 - **Swing Trader** — months compressed to minutes, rebalance at each
   checkpoint.
 - **Hall of Fame** — curated famous weeks (Lehman, COVID capitulation,
@@ -33,11 +33,27 @@ every mode is playable from the start.
 
 | Action | Mobile | Keyboard |
 |---|---|---|
-| Place a call | tap BUY / CASH / SHORT | `Tab` switches side, `Space`/`Enter` commits |
+| Place a call | tap CALL / CASH / PUT | `Tab` switches side, `Space`/`Enter` commits |
 | Fast-forward the tape | tap the chart | tap the chart (or `>>` to skip to the decision) |
 | Pause | `II` | `Esc` |
+| Exit an open trade | tap EXIT NOW | `X` |
 
-Everything else is watching lines go up and down.
+The live read explains EMA9/EMA21 alignment, slope, RSI, crossovers, and breaks
+of the previous 14 candles' support/resistance. It uses observed candles only;
+the current forming candle does not set its own range levels.
+
+Before entering, choose manual exits or a bracket: a stop one observed average
+true range away and a target twice that distance, or a wider 1.5x/3x plan.
+Levels freeze at entry. You can override either plan with EXIT NOW. Stops and
+targets fill at the observed tick, so gaps can pass the requested level. Trades
+still open at the final checkpoint settle there. Early exits in Day/Swing leave
+you in cash until the next scheduled decision.
+
+CALL and PUT are directional game positions using the original bankroll return
+math; there are no option premiums or expiry pricing. Quick Flip shows live
+P&L, profitable-call counts, win streaks, and best open gain versus realized
+return so you can work on exit timing. Its reveal runs at a controllable pace
+and resets fast-forward on entry.
 
 ## Run / build locally
 
@@ -99,7 +115,7 @@ game/
                          LevelGen/LevelDef (seeded levels) · RoundRules (settle math)
   src/game/round_flow.gd enum FSM: INTRO>WATCH>DECIDE>RESOLVE>SETTLE>... shared by all modes
   src/ui/                PriceChart (candles + grid-locked tape, EMA/BB, volume, MACD),
-                         DecisionBar (BUY/CASH/SHORT pad), UI theme
+                         DecisionBar (CALL/CASH/PUT pad), UI theme
   src/screens/           title, mode select (+ Hall of Fame), rank record, play
   tests/                 headless logic tests + UI/flow smoke
 tools/                   build_data.py, make_icons.py, serve.py, e2e.mjs
@@ -108,7 +124,8 @@ docs/decisions/          decision records (see 2026-11-01-alleyway-game.md)
 
 The chart's "live" feel is synthesized: each daily bar becomes a seeded
 tick path `open -> (low|high) -> (high|low) -> close` inside the bar's range,
-with deterministic bridges across overnight gaps. Same seed on any machine
+with deterministic bridges across overnight gaps. High/low order is seeded
+independently of the closing direction, avoiding a synthetic tell. Same seed on any machine
 reproduces every tick, which is what makes levels shareable and tests
 meaningful.
 

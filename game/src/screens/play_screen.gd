@@ -12,6 +12,8 @@ var level: LevelDef
 var flow: RoundFlow
 var chart: PriceChart
 
+var _level_label: Label
+var _subtitle_label: Label
 var _bankroll_label: Label
 var _info_label: Label
 var _pos_badge: Label
@@ -24,6 +26,15 @@ var _card_box: VBoxContainer
 var _paused := false
 var _quick_carry := 0.0
 var _last_settled: Dictionary = {}
+var _analysis_label: Label
+var _plan_picker: OptionButton
+var _trade_row: HBoxContainer
+var _exit_button: Button
+var _trade_label: Label
+var _streak := 0
+var _best_streak := 0
+var _calls := 0
+var _wins := 0
 
 
 func with_params(p: Dictionary) -> void:
@@ -56,13 +67,13 @@ func _ready() -> void:
 	var title_box := VBoxContainer.new()
 	title_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(title_box)
-	var lvl_lbl := UI.label(level.display_name, 17)
-	lvl_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	title_box.add_child(lvl_lbl)
-	var sub_lbl := UI.label("%s · %s" % [level.mode.display_name, level.subtitle], 12, UI.TEXT_DIM)
-	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	sub_lbl.clip_text = true
-	title_box.add_child(sub_lbl)
+	_level_label = UI.label(level.display_name, 17)
+	_level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	title_box.add_child(_level_label)
+	_subtitle_label = UI.label("%s · %s" % [level.mode.display_name, level.subtitle], 12, UI.TEXT_DIM)
+	_subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_subtitle_label.clip_text = true
+	title_box.add_child(_subtitle_label)
 	_bankroll_label = UI.label(RoundRules.fmt_money(_starting_bankroll()), 22)
 	_bankroll_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_bankroll_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -105,9 +116,38 @@ func _ready() -> void:
 	chart.tap_tape.connect(_on_tap_tape)
 	col.add_child(chart)
 
+	# --- live read / player-owned exit plan ---
+	_analysis_label = UI.label("Reading the tape…", 13, UI.TEXT_DIM, true)
+	_analysis_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	col.add_child(_analysis_label)
+	_plan_picker = OptionButton.new()
+	_plan_picker.custom_minimum_size = Vector2(0, 40)
+	_plan_picker.focus_mode = Control.FOCUS_NONE
+	_plan_picker.add_item("EXIT PLAN · Manual / no bracket")
+	_plan_picker.add_item("EXIT PLAN · 1x range stop / 2x target")
+	_plan_picker.add_item("EXIT PLAN · 1.5x range stop / 3x target")
+	_plan_picker.selected = 1
+	_plan_picker.tooltip_text = "Range uses 14 observed candles. Levels lock at entry. Exit now is always available."
+	_plan_picker.hide()
+	col.add_child(_plan_picker)
+	_trade_row = HBoxContainer.new()
+	_trade_label = UI.label("", 14, UI.TEXT_DIM, true)
+	_trade_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_trade_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_trade_row.add_child(_trade_label)
+	_exit_button = Button.new()
+	_exit_button.text = "EXIT NOW [X]"
+	_exit_button.custom_minimum_size = Vector2(150, 56)
+	_exit_button.focus_mode = Control.FOCUS_NONE
+	UI.tint_button(_exit_button, UI.GREEN_DARK)
+	_exit_button.pressed.connect(func() -> void: flow.exit_now())
+	_trade_row.add_child(_exit_button)
+	_trade_row.hide()
+	col.add_child(_trade_row)
+
 	# --- decision pad ---
 	_decision_bar = DecisionBar.new(level.mode.allow_cash)
-	_decision_bar.committed.connect(func(pos: int) -> void: flow.continue_decision(pos))
+	_decision_bar.committed.connect(_commit_trade)
 	col.add_child(_decision_bar)
 
 	# --- overlay card ---
@@ -188,10 +228,11 @@ func _show_intro() -> void:
 	_card_box.add_child(UI.label("Bankroll %s" % RoundRules.fmt_money(_starting_bankroll()), 16))
 	if level.mode.allow_cash:
 		_card_box.add_child(UI.label(
-			"Before each night, decide the move: BUY rides it up, SHORT profits from the fall, CASH sits it out.",
+			"CALL rides the rise. PUT rides the fall. CASH sits out. These are directional trades scored on the price move.",
 			14, UI.TEXT_DIM, true))
 	_card_box.add_child(UI.label("seed #%d" % level.seed_value, 11, UI.TEXT_DIM))
-	var hint := "Tap BUY / SHORT" + (" / CASH" if level.mode.allow_cash else "") + "\nTab switches - Space commits"
+	_card_box.add_child(UI.label("Read EMA trend, momentum and range levels. Choose an exit plan before entry; take profit or cut a loss anytime with EXIT NOW (X).", 14, UI.TEXT_DIM, true))
+	var hint := "Tap CALL / PUT" + (" / CASH" if level.mode.allow_cash else "") + "\nTab switches - Space commits"
 	_card_box.add_child(UI.label(hint, 13, UI.TEXT_DIM))
 	_card_button("START SESSION", func() -> void:
 		_hide_card()
@@ -203,11 +244,14 @@ func _show_settle_card(info: Dictionary) -> void:
 	_clear_card()
 	var pnl := float(info["pnl"])
 	var color := UI.GREEN if pnl > 0 else (UI.RED if pnl < 0 else UI.TEXT_DIM)
-	_card_box.add_child(UI.label("CALL SETTLED", 13, UI.GOLD))
+	_card_box.add_child(UI.label(str(info.get("exit_reason", "checkpoint")).to_upper(), 13, UI.GOLD))
 	_card_box.add_child(UI.label("%s  @  %.2f -> %.2f" % [RoundRules.position_label(int(info["pos"])),
 			float(info["entry"]), float(info["exit"])], 14, UI.TEXT_DIM))
 	_card_box.add_child(UI.label("%s  (%s)" % [RoundRules.fmt_money(pnl), RoundRules.fmt_pct(float(info["ret"]))], 26, color))
 	_card_box.add_child(UI.label("Bankroll %s" % RoundRules.fmt_money(flow.bankroll), 16))
+	_card_box.add_child(UI.label("%d/%d profitable · streak %d · best %d" % [_wins, _calls, _streak, _best_streak], 13, UI.GOLD))
+	if int(info["pos"]) != RoundRules.CASH:
+		_card_box.add_child(UI.label("Best open gain %s · kept %s" % [RoundRules.fmt_pct(float(info.get("best_ret", 0.0))), RoundRules.fmt_pct(float(info["ret"]))], 13, UI.TEXT_DIM, true))
 	_card_button("NEXT CALL >", _next_quick_round, UI.GREEN_DARK)
 	_card_button("CASH OUT", _back_to_select)
 	_show_card()
@@ -254,8 +298,15 @@ func _show_pause() -> void:
 # --- flow callbacks ------------------------------------------------------------
 
 func _on_state_changed(state: int) -> void:
-	_skip_btn.visible = state in [RoundFlow.State.WATCH, RoundFlow.State.RESOLVE]
+	_pause_btn.disabled = state not in [RoundFlow.State.WATCH, RoundFlow.State.RESOLVE, RoundFlow.State.DECIDE]
+	_skip_btn.visible = state == RoundFlow.State.WATCH or (state == RoundFlow.State.RESOLVE and flow.positions.back() == RoundRules.CASH)
+	_plan_picker.visible = state == RoundFlow.State.DECIDE
+	_trade_row.visible = state == RoundFlow.State.RESOLVE
+	if state == RoundFlow.State.DECIDE:
+		_info_label.remove_theme_color_override("font_color")
 	match state:
+		RoundFlow.State.RESOLVE:
+			_update_trade()
 		RoundFlow.State.DECIDE:
 			_info_label.text = "DECIDE NOW"
 			_info_label.add_theme_color_override("font_color", UI.GOLD)
@@ -270,11 +321,16 @@ func _on_session_started(index: int, first_price: float, reset_view: bool) -> vo
 	if reset_view:
 		chart.reset()
 		chart.session_start_price = first_price
-		_pos_badge.text = ""
+		if index == 0:
+			_pos_badge.text = ""
 		_bankroll_label.add_theme_color_override("font_color", UI.TEXT)
 		var first_bar := level.start_bar if index == 0 else level.checkpoint_bar(index - 1) + 1
 		var s := series()
 		chart.seed_history(s, maxi(0, first_bar - PriceChart.HIST_BARS), first_bar - 1)
+		if index > 0 and flow.positions.back() != RoundRules.CASH:
+			chart.set_entry(flow.entries.back(), "%s @ %.2f" % [RoundRules.position_label(flow.positions.back()), flow.entries.back()])
+			chart.stop_price = flow.exit_stop
+			chart.target_price = flow.exit_target
 	else:
 		chart.session_start_price = first_price
 		chart.refresh_view(true)
@@ -283,6 +339,8 @@ func _on_session_started(index: int, first_price: float, reset_view: bool) -> vo
 
 func _on_tick(price: float, vol: float, bar: int, tick: int, in_gap: bool) -> void:
 	chart.push(price, vol, bar, tick, in_gap)
+	_update_analysis()
+	_update_trade()
 	if in_gap:
 		_info_label.text = ">> OVERNIGHT"
 	elif level.mode.kind == ModeConfig.Kind.DAY_TRADER:
@@ -293,12 +351,17 @@ func _on_tick(price: float, vol: float, bar: int, tick: int, in_gap: bool) -> vo
 
 
 func _on_window_opened(_seconds: float) -> void:
+	chart.stop_price = 0.0
+	chart.target_price = 0.0
 	_decision_bar.open_window(level.decision_seconds)
+	_update_analysis()
 	_pos_badge.text = ""
 
 
 func _on_position_opened(pos: int, entry: float) -> void:
 	_decision_bar.close_window()
+	chart.stop_price = flow.exit_stop
+	chart.target_price = flow.exit_target
 	_pos_badge.text = "%s @ %.2f" % [RoundRules.position_label(pos), entry]
 	_pos_badge.add_theme_color_override("font_color",
 		UI.GREEN if pos == RoundRules.LONG else (UI.RED if pos == RoundRules.SHORT else UI.CASH_BLUE))
@@ -310,6 +373,18 @@ func _on_position_opened(pos: int, entry: float) -> void:
 
 func _on_settled(info: Dictionary) -> void:
 	_last_settled = info
+	_calls += 1
+	if float(info["pnl"]) > 0.0:
+		_wins += 1
+		_streak += 1
+		_best_streak = maxi(_best_streak, _streak)
+	elif int(info["pos"]) != RoundRules.CASH:
+		_streak = 0
+	_exit_button.disabled = true
+	_skip_btn.visible = level.mode.kind != ModeConfig.Kind.QUICK_FLIP
+	_trade_label.text = "Closed · %s\nWaiting for next checkpoint" % info.get("exit_reason", "checkpoint")
+	chart.stop_price = 0.0
+	chart.target_price = 0.0
 	_bankroll_label.text = RoundRules.fmt_money(flow.bankroll)
 	var pnl := float(info["pnl"])
 	var color := UI.GREEN if pnl > 0 else (UI.RED if pnl < 0 else UI.TEXT_DIM)
@@ -337,12 +412,46 @@ func _next_quick_round() -> void:
 	_last_settled = {}
 	var carry := flow.bankroll
 	level = LevelGen.make(level.mode, randi(), MarketData.series)
+	_level_label.text = level.display_name
+	_subtitle_label.text = "%s · %s" % [level.mode.display_name, level.subtitle]
 	flow.setup(level, series())
 	flow.bankroll = carry
 	# setup() keeps the machine parked in SETTLE after the card; begin() only
 	# fires from INTRO, so route through start() or the round never begins.
 	flow.start()
 	flow.begin()
+
+
+func _commit_trade(pos: int) -> void:
+	var risk := float(chart.analysis.get("atr", flow.last_price * 0.01))
+	var multiple := 1.5 if _plan_picker.selected == 2 else 1.0
+	if _plan_picker.selected == 0 or pos == RoundRules.CASH:
+		flow.set_exit_plan(0.0, 0.0)
+	else:
+		flow.set_exit_plan(maxf(0.01, flow.last_price - pos * risk * multiple),
+			maxf(0.01, flow.last_price + pos * risk * multiple * 2.0))
+	flow.continue_decision(pos)
+
+
+func _update_analysis() -> void:
+	var a := chart.analysis
+	if a.is_empty():
+		return
+	_analysis_label.text = "%s · %s (%s) · RSI %.0f\n%s" % [a["bias"], a["trend"], a["slope"], a["rsi"], a["event"]]
+	_analysis_label.add_theme_color_override("font_color", UI.GREEN if int(a["score"]) >= 3 else (UI.RED if int(a["score"]) <= -3 else UI.TEXT_DIM))
+
+
+func _update_trade() -> void:
+	if not flow.has_open_position():
+		return
+	var live := flow.live_position()
+	var pos: int = flow.positions.back()
+	_exit_button.disabled = pos == RoundRules.CASH
+	var ret := float(live["ret"])
+	_trade_label.text = "CASH · watching the next move" if pos == RoundRules.CASH else "%s  %s\n%s" % [RoundRules.fmt_money(float(live["pnl"])), RoundRules.fmt_pct(ret),
+		"Exit whenever you choose" if flow.exit_stop <= 0.0 else "Stop %.2f · target %.2f" % [flow.exit_stop, flow.exit_target]]
+	_trade_label.add_theme_color_override("font_color", UI.GREEN if ret > 0 else (UI.RED if ret < 0 else UI.TEXT_DIM))
+	_bankroll_label.text = RoundRules.fmt_money(float(live["bankroll"]))
 
 
 func series() -> MarketSeries:
@@ -374,6 +483,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				RoundFlow.State.SETTLE:
 					if level.mode.kind == ModeConfig.Kind.QUICK_FLIP and _overlay.visible:
 						_next_quick_round()
+		KEY_X:
+			flow.exit_now()
+			accept_event()
 		KEY_ESCAPE:
 			if flow.state != RoundFlow.State.INTRO:
 				_toggle_pause()
@@ -388,6 +500,8 @@ func _on_tap_tape() -> void:
 
 
 func _toggle_pause() -> void:
+	if not _paused and flow.state not in [RoundFlow.State.WATCH, RoundFlow.State.RESOLVE, RoundFlow.State.DECIDE]:
+		return
 	_paused = not _paused
 	flow.set_process(not _paused)
 	if _paused:

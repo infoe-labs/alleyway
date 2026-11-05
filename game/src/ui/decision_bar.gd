@@ -1,7 +1,7 @@
 class_name DecisionBar
 extends VBoxContainer
 
-## The tap pad. During a decision window the player taps SELL / CASH / BUY
+## The tap pad. During a decision window the player taps CALL / CASH / PUT
 ## directly, or cycles the highlight with Tab and commits with Space/Enter.
 
 signal committed(pos: int)
@@ -67,16 +67,16 @@ func _init(allow_cash: bool) -> void:
 func _label_for(pos: int) -> String:
 	match pos:
 		OPT_LONG:
-			return "BUY\nUP"
+			return "CALL\nUP"
 		OPT_SHORT:
-			return "SHORT\nDOWN"
+			return "PUT\nDOWN"
 		_:
 			return "CASH\nSIT OUT"
 
 
 func open_window(seconds: float) -> void:
 	_open = true
-	_selected = 0
+	_selected = _order.find(OPT_CASH) if OPT_CASH in _order else 0
 	_timer.value = 1.0
 	for pos in _order:
 		_buttons[pos].disabled = false

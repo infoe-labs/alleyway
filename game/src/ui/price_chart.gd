@@ -33,6 +33,9 @@ var intraday := false                      # day-trader view: live bar fills the
 var session_start_price := 0.0             # baseline for green/red decision
 var entry_price := -1.0                    # dashed entry line; <0 disables
 var entry_label := ""
+var stop_price := 0.0
+var target_price := 0.0
+var analysis: Dictionary = {}
 var last_price := 0.0
 
 # Bar space, oldest .. newest. The last bar is the live/forming one.
@@ -125,6 +128,8 @@ func reset() -> void:
 	_series = null
 	entry_price = -1.0
 	entry_label = ""
+	stop_price = 0.0
+	target_price = 0.0
 	session_start_price = 0.0
 	last_price = 0.0
 	_hover_x = NAN
@@ -221,6 +226,7 @@ func _refresh_indicators() -> void:
 	_bb = Indicators.bollinger(bc, 20, 2.0)
 	_macd = Indicators.macd(bc, 12, 26, 9)
 	_rsi = Indicators.rsi(bc, 14)
+	analysis = TapeAnalysis.read(bc, bh, bl)
 
 
 func _current_color() -> Color:
@@ -232,15 +238,16 @@ func _current_color() -> Color:
 func _refresh_target(out_min: Array, out_max: Array) -> void:
 	var lo := INF
 	var hi := -INF
-	# Hero + anchor: the live session's streamed ticks set the story. Day
-	# Trader anchors on the live bar alone (the day fills the screen); other
-	# modes anchor on the last few bars so a fresh/flat session can't zoom
-	# into noise.
-	var anchor := 1 if intraday else 8
+	# Fit the visible candle window so prior bars remain readable as the tape moves.
+	var anchor := visible_bars
 	var from_i := maxi(0, bc.size() - anchor)
 	for i in range(from_i, bc.size()):
 		lo = minf(lo, bl[i])
 		hi = maxf(hi, bh[i])
+		for overlay in [_ema9[i], _ema21[i]]:
+			if is_finite(overlay):
+				lo = minf(lo, overlay)
+				hi = maxf(hi, overlay)
 	for p in points:
 		lo = minf(lo, p)
 		hi = maxf(hi, p)
@@ -258,6 +265,10 @@ func _refresh_target(out_min: Array, out_max: Array) -> void:
 	if entry_price > 0.0:
 		lo = minf(lo, entry_price)
 		hi = maxf(hi, entry_price)
+	for guide in [stop_price, target_price]:
+		if guide > 0.0:
+			lo = minf(lo, guide)
+			hi = maxf(hi, guide)
 	if not is_finite(lo):
 		return
 	# Floor the window so a flat session doesn't zoom into noise.
@@ -266,8 +277,9 @@ func _refresh_target(out_min: Array, out_max: Array) -> void:
 	if hi - lo < floor_w:
 		hi = mid + floor_w * 0.5
 		lo = mid - floor_w * 0.5
-	out_min[0] = lo
-	out_max[0] = hi
+	var padding := (hi - lo) * 0.06
+	out_min[0] = lo - padding
+	out_max[0] = hi + padding
 
 
 func refresh_view(instant: bool) -> void:
@@ -280,8 +292,8 @@ func refresh_view(instant: bool) -> void:
 		_view_min = lo[0]
 		_view_max = hi[0]
 	else:
-		_view_min = lerpf(_view_min, lo[0], 0.18)
-		_view_max = lerpf(_view_max, hi[0], 0.18)
+		_view_min = minf(lo[0], lerpf(_view_min, lo[0], 0.18))
+		_view_max = maxf(hi[0], lerpf(_view_max, hi[0], 0.18))
 
 
 func _y_for(price: float, top: float, height: float) -> float:
@@ -376,6 +388,20 @@ func _draw() -> void:
 	_polyline(_ema9, w, bar_w, n, func(i): return _y_for(_ema9[i], price_top, price_h),
 		UI.GOLD, 1.5, price_top - 1.0, price_bot + 1.0)
 
+	# Observed range levels exclude the forming candle; exit levels freeze at entry.
+	var guides := [
+		[float(analysis.get("support", 0.0)), "SUPPORT", UI.GREEN],
+		[float(analysis.get("resistance", 0.0)), "RESISTANCE", UI.RED],
+		[stop_price, "STOP", UI.RED],
+		[target_price, "TARGET", UI.GOLD],
+	]
+	for guide in guides:
+		var gy := _y_for(float(guide[0]), price_top, price_h)
+		if float(guide[0]) > 0.0 and gy > price_top + 18.0 and gy < price_bot:
+			draw_dashed_line(Vector2(0, gy), Vector2(w, gy), Color(guide[2], 0.45), 1.0, 5.0)
+			draw_string(font, Vector2(w - 150.0, gy - 4.0), "%s %.2f" % [guide[1], guide[0]],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, guide[2])
+
 	# Entry line, clipped to the price region.
 	if entry_price > 0.0:
 		var ey := _y_for(entry_price, price_top, price_h)
@@ -396,14 +422,14 @@ func _draw() -> void:
 				prev = Vector2(NAN, NAN)
 				continue
 			var p := Vector2(x, _y_for(points[i], price_top, price_h))
-			if is_finite(prev.x) and absf(p.y - prev.y) <= price_h * 0.25:
+			if is_finite(prev.x):
 				draw_line(prev, p, line_color, 2.5, true)
 			prev = p
 
 	# Head dot at the tape's end + price tag pinned right.
 	if m >= 1:
 		var hx := w - (float(head) + 1.0 - point_u[m - 1]) * bar_w
-		var head_pt := Vector2(hx, _y_for(points[m - 1], price_top, price_h))
+		var head_pt := Vector2(hx, _y_for(last_price, price_top, price_h))
 		draw_circle(head_pt, 4.0, line_color)
 		draw_circle(head_pt, 8.0, Color(line_color, 0.25))
 		var tag := "%.2f" % last_price

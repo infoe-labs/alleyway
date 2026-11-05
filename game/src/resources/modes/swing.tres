@@ -6,13 +6,13 @@
 script = ExtResource("1_mode")
 id = "swing"
 display_name = "Swing Trader"
-blurb = "Months compressed to minutes. Before each stretch: buy, cash, or short at every checkpoint."
+blurb = "Months compressed to minutes. Before each stretch: call, cash, or put at every checkpoint."
 kind = 2
 unlock_rank = 0
 symbols = Array[String](["SPY"])
 bar_seconds = 0.42
 reveal_speed_mult = 1.0
-decision_seconds = 7.5
+decision_seconds = 12.0
 ticks_per_bar = 18
 warmup_min = 12
 warmup_max = 20

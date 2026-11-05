@@ -16,6 +16,7 @@ func _initialize() -> void:
 	_test_levels()
 	_test_rules()
 	_test_indicators()
+	_test_analysis()
 	print("── %s ──" % ("ALL PASS" if failures == 0 else "%d FAILURE(S)" % failures))
 	quit(0 if failures == 0 else 1)
 
@@ -96,6 +97,16 @@ func _test_tape() -> void:
 	check(inside, "ticks stay inside the bar's range")
 	var gap := t1.gap_ticks(1000)
 	check(gap.size() == Tape.GAP_TICKS, "gap has GAP_TICKS points")
+	var synthetic := MarketSeries.new()
+	synthetic.symbol = "TEST"
+	synthetic.opens = PackedFloat32Array([100.0])
+	synthetic.highs = PackedFloat32Array([110.0])
+	synthetic.lows = PackedFloat32Array([90.0])
+	synthetic.closes = PackedFloat32Array([105.0])
+	var bullish := Tape.new(synthetic, 24).bar_ticks(0)
+	synthetic.closes[0] = 95.0
+	var bearish := Tape.new(synthetic, 24).bar_ticks(0)
+	check(bullish[7] == bearish[7] and bullish[15] == bearish[15], "synthetic high/low order does not reveal future closing direction")
 	check(absf(gap[gap.size() - 1] - spy.opens[1001]) < 0.0001, "gap lands on next open")
 
 
@@ -155,10 +166,10 @@ func _test_rules() -> void:
 			"star thresholds")
 	check(RoundRules.fmt_money(-1234.5) == "-$1,235" or RoundRules.fmt_money(-1234.5) == "-$1,234",
 			"money formats with thousands separator (%s)" % RoundRules.fmt_money(-1234.5))
-	check(RoundRules.position_label(RoundRules.LONG) == "BUY"
-			and RoundRules.position_label(RoundRules.SHORT) == "SHORT"
+	check(RoundRules.position_label(RoundRules.LONG) == "CALL"
+			and RoundRules.position_label(RoundRules.SHORT) == "PUT"
 			and RoundRules.position_label(RoundRules.CASH) == "CASH",
-			"position labels read BUY / SHORT / CASH")
+			"position labels read CALL / PUT / CASH")
 
 
 func _test_indicators() -> void:
@@ -217,3 +228,26 @@ func _test_indicators() -> void:
 		zz.append(50.0 + (1.0 if i % 2 == 0 else -1.0))
 	var rz := Indicators.rsi(zz, 14)
 	check(absf(rz[39] - 50.0) < 4.0, "rsi hovers near 50 on even chop (%.1f)" % rz[39])
+
+
+func _test_analysis() -> void:
+	var closes := PackedFloat32Array()
+	var highs := PackedFloat32Array()
+	var lows := PackedFloat32Array()
+	for i in 40:
+		closes.append(100.0 + i)
+		highs.append(100.5 + i)
+		lows.append(99.5 + i)
+	var a := TapeAnalysis.read(closes, highs, lows)
+	check(int(a["score"]) >= 3 and a["event"].begins_with("Resistance break"), "analysis explains rising trend and observed breakout")
+	check(absf(float(a["resistance"]) - 138.5) < 0.001, "resistance excludes forming candle")
+	highs[39] = 10000.0
+	lows[39] = 0.01
+	var b := TapeAnalysis.read(closes, highs, lows)
+	check(a["atr"] == b["atr"] and a["support"] == b["support"] and a["resistance"] == b["resistance"], "forming extremes cannot leak into range or bracket sizing")
+	closes.reverse()
+	highs = closes.duplicate()
+	lows = closes.duplicate()
+	var bear := TapeAnalysis.read(closes, highs, lows)
+	check(int(bear["score"]) <= -3, "falling trend produces PUT lean")
+	check(TapeAnalysis.read(PackedFloat32Array([1.0]), PackedFloat32Array([1.0]), PackedFloat32Array([1.0])).is_empty(), "analysis waits for warmup")

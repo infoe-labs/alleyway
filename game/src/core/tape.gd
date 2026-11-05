@@ -36,7 +36,8 @@ func bar_ticks(bar: int) -> PackedFloat32Array:
 	var c := series.closes[bar]
 	var rng := SplitMix32.new((_symbol_hash ^ (bar * 0x9E3779B9)) & 0xFFFFFFFF)
 
-	var anchors := PackedFloat32Array([o, l, h, c]) if c >= o else PackedFloat32Array([o, h, l, c])
+	# Extrema order must not reveal the eventual closing direction.
+	var anchors := PackedFloat32Array([o, l, h, c]) if rng.next_float() < 0.5 else PackedFloat32Array([o, h, l, c])
 	var span := maxf(h - l, (o + h + l + c) * 0.0002)
 	var tpb := ticks_per_bar
 	var seg_points := tpb / 3
